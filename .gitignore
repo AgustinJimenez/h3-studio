@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node / frontend build
+node_modules/
+dist/
+
+# Generated project data & media (large binaries, exceeds GitHub's 100MB
+# file limit -- e.g. concat.mp4 is 138MB; this is runtime state, not code).
+# Also includes downloaded pretrained model weights (re-fetched on demand).
+backend/data/
+backend/outputs/
+
+.env

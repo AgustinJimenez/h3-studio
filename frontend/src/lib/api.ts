@@ -1,0 +1,118 @@
+import {
+  VideoSchema,
+  VideoSummarySchema,
+  CharacterSchema,
+  ClipSchema,
+  OptionsSchema,
+  PromptTagSchema,
+  AnimateJobSchema,
+  type Video,
+  type VideoSummary,
+  type Character,
+  type Clip,
+  type Options,
+  type PromptTag,
+  type AnimateJob,
+  type QaReport,
+} from "../schemas";
+
+const API_BASE = "http://127.0.0.1:8787";
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail ? JSON.stringify(body.detail) : detail;
+    } catch {
+      // ignore, keep statusText
+    }
+    throw new Error(`${res.status} ${detail}`);
+  }
+  if (res.status === 204) return null as T;
+  return res.json();
+}
+
+export function mediaUrl(url?: string | null): string | null {
+  if (!url) return null;
+  return `${API_BASE}${url}`;
+}
+
+export function referencePreviewUrl(path?: string | null): string | null {
+  if (!path) return null;
+  return `${API_BASE}/reference-preview?path=${encodeURIComponent(path)}`;
+}
+
+export const api = {
+  getOptions: async (modelType?: string | null): Promise<Options> =>
+    OptionsSchema.parse(await request(`/options${modelType ? `?model_type=${encodeURIComponent(modelType)}` : ""}`)),
+
+  listVideos: async (): Promise<VideoSummary[]> =>
+    VideoSummarySchema.array().parse(await request("/videos")),
+  createVideo: async (body: { title: string; template_settings?: Record<string, unknown>; base_prompt?: Record<string, unknown> }): Promise<Video> =>
+    VideoSchema.parse(await request("/videos", { method: "POST", body: JSON.stringify(body) })),
+  getVideo: async (id: string): Promise<Video> => VideoSchema.parse(await request(`/videos/${id}`)),
+  updateVideo: async (id: string, body: Record<string, unknown>): Promise<Video> =>
+    VideoSchema.parse(await request(`/videos/${id}`, { method: "PUT", body: JSON.stringify(body) })),
+  deleteVideo: (id: string) => request(`/videos/${id}`, { method: "DELETE" }),
+
+  createClip: async (videoId: string, body: Partial<Clip>): Promise<Clip> =>
+    ClipSchema.parse(await request(`/videos/${videoId}/clips`, { method: "POST", body: JSON.stringify(body) })),
+  updateClip: async (videoId: string, clipId: string, body: Partial<Clip>): Promise<Clip> =>
+    ClipSchema.parse(await request(`/videos/${videoId}/clips/${clipId}`, { method: "PUT", body: JSON.stringify(body) })),
+  deleteClip: (videoId: string, clipId: string) => request(`/videos/${videoId}/clips/${clipId}`, { method: "DELETE" }),
+  reorderClips: (videoId: string, clipIds: string[]) =>
+    request(`/videos/${videoId}/clips/reorder`, { method: "PATCH", body: JSON.stringify({ clip_ids: clipIds }) }),
+  generateClip: (clipId: string) => request<{ job_id: string; status: string }>(`/clips/${clipId}/generate`, { method: "POST" }),
+  analyzeClip: (clipId: string): Promise<QaReport> => request(`/clips/${clipId}/analyze`, { method: "POST" }),
+  unloadModel: () => request<{ ok: boolean }>("/unload-model", { method: "POST" }),
+  concatVideo: async (videoId: string): Promise<Video> =>
+    VideoSchema.parse(await request(`/videos/${videoId}/concat`, { method: "POST" })),
+
+  createCharacter: async (videoId: string, body: Partial<Character>): Promise<Character> =>
+    CharacterSchema.parse(await request(`/videos/${videoId}/characters`, { method: "POST", body: JSON.stringify(body) })),
+  getCharacter: async (videoId: string, characterId: string): Promise<Character> =>
+    CharacterSchema.parse(await request(`/videos/${videoId}/characters/${characterId}`)),
+  updateCharacter: async (videoId: string, characterId: string, body: Record<string, unknown>): Promise<Character> =>
+    CharacterSchema.parse(await request(`/videos/${videoId}/characters/${characterId}`, { method: "PUT", body: JSON.stringify(body) })),
+  deleteCharacter: (videoId: string, characterId: string) => request(`/videos/${videoId}/characters/${characterId}`, { method: "DELETE" }),
+
+  addReference: async (videoId: string, characterId: string, body: { type: string; path: string; note?: string }): Promise<Character> =>
+    CharacterSchema.parse(await request(`/videos/${videoId}/characters/${characterId}/references`, { method: "POST", body: JSON.stringify(body) })),
+  deleteReference: (videoId: string, characterId: string, referenceId: string) =>
+    request(`/videos/${videoId}/characters/${characterId}/references/${referenceId}`, { method: "DELETE" }),
+  upscaleReference: (videoId: string, characterId: string, referenceId: string) =>
+    request<{ job_id: string; status: string }>(`/videos/${videoId}/characters/${characterId}/references/${referenceId}/upscale`, { method: "POST" }),
+
+  createReferenceVideo: async (videoId: string, characterId: string, body: Record<string, unknown>): Promise<Character> =>
+    CharacterSchema.parse(await request(`/videos/${videoId}/characters/${characterId}/reference-videos`, { method: "POST", body: JSON.stringify(body) })),
+  updateReferenceVideo: async (videoId: string, characterId: string, referenceVideoId: string, body: Record<string, unknown>): Promise<Character> =>
+    CharacterSchema.parse(await request(`/videos/${videoId}/characters/${characterId}/reference-videos/${referenceVideoId}`, { method: "PUT", body: JSON.stringify(body) })),
+  deleteReferenceVideo: (videoId: string, characterId: string, referenceVideoId: string) =>
+    request(`/videos/${videoId}/characters/${characterId}/reference-videos/${referenceVideoId}`, { method: "DELETE" }),
+  generateReferenceVideo: (characterId: string, referenceVideoId: string) =>
+    request<{ job_id: string; status: string }>(`/characters/${characterId}/reference-videos/${referenceVideoId}/generate`, { method: "POST" }),
+  upscaleReferenceVideo: (characterId: string, referenceVideoId: string) =>
+    request<{ job_id: string; status: string }>(`/characters/${characterId}/reference-videos/${referenceVideoId}/upscale`, { method: "POST" }),
+  captureReferenceFrame: async (characterId: string, referenceVideoId: string, body: { timestamp: number; source?: string; note?: string }): Promise<Character> =>
+    CharacterSchema.parse(await request(`/characters/${characterId}/reference-videos/${referenceVideoId}/capture-frame`, { method: "POST", body: JSON.stringify(body) })),
+
+  listPromptTags: async (): Promise<PromptTag[]> => PromptTagSchema.array().parse(await request("/prompt-tags")),
+  createPromptTag: async (body: { name: string; key: string; body: string }): Promise<PromptTag> =>
+    PromptTagSchema.parse(await request("/prompt-tags", { method: "POST", body: JSON.stringify(body) })),
+  updatePromptTag: async (id: string, body: Partial<{ name: string; key: string; body: string }>): Promise<PromptTag> =>
+    PromptTagSchema.parse(await request(`/prompt-tags/${id}`, { method: "PUT", body: JSON.stringify(body) })),
+  deletePromptTag: (id: string) => request(`/prompt-tags/${id}`, { method: "DELETE" }),
+
+  listAnimateJobs: async (): Promise<AnimateJob[]> => AnimateJobSchema.array().parse(await request("/animate-jobs")),
+  createAnimateJob: async (body: Partial<AnimateJob>): Promise<AnimateJob> =>
+    AnimateJobSchema.parse(await request("/animate-jobs", { method: "POST", body: JSON.stringify(body) })),
+  updateAnimateJob: async (id: string, body: Partial<AnimateJob>): Promise<AnimateJob> =>
+    AnimateJobSchema.parse(await request(`/animate-jobs/${id}`, { method: "PUT", body: JSON.stringify(body) })),
+  deleteAnimateJob: (id: string) => request(`/animate-jobs/${id}`, { method: "DELETE" }),
+  generateAnimateJob: (id: string) => request<{ job_id: string; status: string }>(`/animate-jobs/${id}/generate`, { method: "POST" }),
+};

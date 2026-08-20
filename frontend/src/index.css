@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+@theme {
+  --color-text: var(--text);
+  --color-text-h: var(--text-h);
+  --color-bg: var(--bg);
+  --color-bg-alt: var(--bg-alt);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-danger: var(--danger);
+  --color-status-draft: var(--status-draft);
+  --color-status-queued: var(--status-queued);
+  --color-status-running: var(--status-running);
+  --color-status-done: var(--status-done);
+  --color-status-failed: var(--status-failed);
+}
+
+:root {
+  --text: #3a3a3a;
+  --text-h: #111;
+  --bg: #fff;
+  --bg-alt: #f6f6f8;
+  --border: #ddd;
+  --accent: #6b3bff;
+  --accent-text: #fff;
+  --danger: #c62828;
+  --status-draft: #888;
+  --status-queued: #b8860b;
+  --status-running: #1976d2;
+  --status-done: #2e7d32;
+  --status-failed: #c62828;
+
+  font: 15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #d0d0d5;
+    --text-h: #f5f5f7;
+    --bg: #17181d;
+    --bg-alt: #202127;
+    --border: #33343c;
+    --accent: #9b7bff;
+    --accent-text: #111;
+  }
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  background: var(--bg);
+}
+
+h1, h2, h3 {
+  color: var(--text-h);
+}
+
+a {
+  color: var(--accent);
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-alt);
+  color: var(--text-h);
+  border-radius: 6px;
+  padding: 6px 12px;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+input, textarea, select {
+  font: inherit;
+  color: var(--text-h);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.status-spinner {
+  width: 9px;
+  height: 9px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  display: inline-block;
+  animation: status-spin 0.7s linear infinite;
+}
+
+@keyframes status-spin {
+  to { transform: rotate(360deg); }
+}
