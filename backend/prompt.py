@@ -373,6 +373,30 @@ def compose_cardinality_directive(characters: list[dict[str, Any]]) -> str:
     )
 
 
+def active_characters_for_clip(video: dict[str, Any], clip: dict[str, Any]) -> list[dict[str, Any]]:
+    """The character roster to actually compose this clip's prompt from.
+
+    `clip["active_character_ids"]` lets a clip use only a subset of the
+    video's full character list -- None/absent means "all of them" (the
+    original, still-default behavior). Without this, a video with a
+    character who only appears in some clips would have
+    compose_retention_analysis auto-claim they "appear throughout" on every
+    other clip too, which isn't just misleading text -- it's a real
+    hallucination risk (the model gets told to render someone who was never
+    meant to be in that shot). Filtering here, before the composition
+    functions ever see the roster, means <Subject N>/<Picture N>/etc. get
+    renumbered against just this clip's own subset too, not the full video's
+    ids, since compose_subject_definitions/compose_retention_analysis/
+    compose_references all number positionally from whatever list they're
+    given."""
+    characters = video.get("characters") or []
+    active_ids = clip.get("active_character_ids")
+    if active_ids is None:
+        return characters
+    active_id_set = set(active_ids)
+    return [c for c in characters if c.get("id") in active_id_set]
+
+
 def build_prompt_string(base_prompt: dict[str, str], characters: list[dict[str, Any]], shot_prompt: str) -> str:
     sections = {**DEFAULT_BASE_PROMPT, **(base_prompt or {})}
     sections["subject_definitions"] = compose_subject_definitions(characters or [])
@@ -445,7 +469,7 @@ def build_generation_settings(
     clip's opening frame — instead of the next clip becoming a stale,
     visually-discontinuous dead end that also needs regenerating."""
     template = {**DEFAULT_TEMPLATE_SETTINGS, **(video.get("template_settings") or {})}
-    characters = video.get("characters") or []
+    characters = active_characters_for_clip(video, clip)
     prompt = build_prompt_string(video.get("base_prompt") or {}, characters, clip.get("shot_prompt") or "")
     video_length = int(clip.get("video_length") or DEFAULT_VIDEO_LENGTH)
     output_filename = f"{video['id']}_{clip['order']:03d}_{clip['id']}"

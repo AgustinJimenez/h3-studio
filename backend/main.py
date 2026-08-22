@@ -196,6 +196,7 @@ class ClipCreate(BaseModel):
     continue_from_previous: bool = False
     continuation_keep_frames: Optional[int] = None
     bridge_to_next: bool = False
+    active_character_ids: Optional[list[str]] = None
 
 
 class ClipUpdate(BaseModel):
@@ -205,6 +206,7 @@ class ClipUpdate(BaseModel):
     continue_from_previous: Optional[bool] = None
     continuation_keep_frames: Optional[int] = None
     bridge_to_next: Optional[bool] = None
+    active_character_ids: Optional[list[str]] = None
 
 
 class ReorderRequest(BaseModel):
@@ -930,6 +932,7 @@ def create_clip(video_id: str, body: ClipCreate):
             "continue_from_previous": body.continue_from_previous,
             "continuation_keep_frames": body.continuation_keep_frames,
             "bridge_to_next": body.bridge_to_next,
+            "active_character_ids": body.active_character_ids,
             "status": "draft",
             "job_id": None,
             "output_path": None,
@@ -962,6 +965,8 @@ def update_clip(video_id: str, clip_id: str, body: ClipUpdate):
             clip["continuation_keep_frames"] = body.continuation_keep_frames
         if body.bridge_to_next is not None:
             clip["bridge_to_next"] = body.bridge_to_next
+        if "active_character_ids" in body.model_fields_set:
+            clip["active_character_ids"] = body.active_character_ids
         return clip
 
     try:

@@ -84,6 +84,7 @@ export const ClipSchema = z.object({
   continue_from_previous: z.boolean().optional().default(false),
   continuation_keep_frames: z.number().nullable().optional(),
   bridge_to_next: z.boolean().optional().default(false),
+  active_character_ids: z.array(z.string()).nullable().optional(),
   status: StatusSchema.catch("draft"),
   job_id: z.string().nullable().optional(),
   output_path: z.string().nullable().optional(),

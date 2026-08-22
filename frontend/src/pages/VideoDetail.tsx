@@ -23,7 +23,7 @@ import GenerationParams from "../components/GenerationParams";
 import ReferenceThumb from "../components/ReferenceThumb";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ShotPromptEditor from "../components/ShotPromptEditor";
-import type { Clip, BasePrompt, ModelTag, QaReport } from "../schemas";
+import type { Clip, BasePrompt, ModelTag, QaReport, Character } from "../schemas";
 
 const ACTIVE_STATUSES = new Set(["queued", "running"]);
 const FPS = 24; // H3's frame rate — see prompt.py's DEFAULT_VIDEO_LENGTH comment.
@@ -267,6 +267,7 @@ export default function VideoDetail() {
               <ClipRow
                 key={clip.id}
                 clip={clip}
+                characters={video.characters}
                 modelTags={video.model_tags}
                 isFirst={i === 0}
                 isLast={i === sortedClips.length - 1}
@@ -325,6 +326,7 @@ export default function VideoDetail() {
 
 function ClipRow({
   clip,
+  characters,
   modelTags,
   isFirst,
   isLast,
@@ -338,6 +340,7 @@ function ClipRow({
   onDelete,
 }: {
   clip: Clip;
+  characters: Character[];
   modelTags: ModelTag[];
   isFirst: boolean;
   isLast: boolean;
@@ -459,6 +462,36 @@ function ClipRow({
             Bridge to next clip (steer this regeneration to land back on the next clip's existing first frame, so
             the rest of the chain doesn't need to be redone)
           </label>
+          {characters.length > 1 && (
+            <fieldset className="flex flex-col gap-1 text-sm">
+              <legend className="opacity-75">
+                Characters in this shot (unchecked ones are left out of the prompt entirely — no "appears
+                throughout" claim for someone who isn't in this scene)
+              </legend>
+              <div className="flex flex-wrap gap-3">
+                {characters.map((character) => {
+                  const activeIds = clip.active_character_ids ?? characters.map((c) => c.id);
+                  const checked = activeIds.includes(character.id);
+                  return (
+                    <label key={character.id} className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...activeIds, character.id]
+                            : activeIds.filter((id) => id !== character.id);
+                          const isFullRoster = characters.every((c) => next.includes(c.id));
+                          onUpdate({ active_character_ids: isFullRoster ? null : next });
+                        }}
+                      />
+                      {character.name || "(unnamed)"}
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+          )}
           {clip.error && <div className="whitespace-pre-wrap rounded border border-danger bg-red-950/30 px-3 py-2 text-danger">{clip.error}</div>}
           {previewUrl && (
             <div className="flex flex-col items-start gap-1">
