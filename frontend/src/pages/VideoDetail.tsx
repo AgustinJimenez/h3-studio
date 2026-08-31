@@ -119,7 +119,7 @@ export default function VideoDetail() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-4 pb-16 pt-6">
+    <div className="mx-auto max-w-4xl px-4 pb-52 pt-6">
       <Link to="/" className="inline-flex items-center gap-1"><ArrowLeft size={14} /> Videos</Link>
       <h1 className="mb-4 mt-2 text-2xl font-bold">{video.title}</h1>
 
@@ -310,8 +310,21 @@ export default function VideoDetail() {
       </div>
 
       <div className="my-4 rounded-lg border border-dashed border-border p-3.5">
-        <button disabled={!anyDone} onClick={() => concatVideo.mutate()}>Join clips</button>
-        {video.concat_output_url && <video controls width={480} className="mt-1.5 max-w-full rounded" src={mediaUrl(video.concat_output_url) ?? undefined} />}
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-text-h">Full Video Preview</h3>
+          <button disabled={!anyDone} onClick={() => concatVideo.mutate()}>Re-join clips</button>
+        </div>
+        {video.concat_output_url ? (
+          <video
+            key={video.concat_output_url}
+            controls
+            width={480}
+            className="mt-2 max-w-full rounded"
+            src={mediaUrl(video.concat_output_url) ?? undefined}
+          />
+        ) : (
+          <div className="mt-2 text-sm opacity-60">Full video will automatically update here as clips complete.</div>
+        )}
       </div>
 
       <ConfirmDialog

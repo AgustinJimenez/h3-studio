@@ -75,7 +75,7 @@ export default function CharacterDetail() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-4 pb-16 pt-6">
+    <div className="mx-auto max-w-4xl px-4 pb-52 pt-6">
       <Link to="/videos/$id/characters" params={{ id }} className="inline-flex items-center gap-1"><ArrowLeft size={14} /> Characters</Link>
       <h1 className="mb-4 mt-2 text-2xl font-bold">Subject {character.order + 1}: {character.name || "(unnamed)"}</h1>
 

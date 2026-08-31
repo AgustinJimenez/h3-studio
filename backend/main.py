@@ -170,6 +170,7 @@ def video_summary(video: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": video["id"],
         "title": video["title"],
+        "created_at": video.get("created_at"),
         "clip_count": len(clips),
         "done_count": sum(1 for c in clips if c["status"] == "done"),
     }
@@ -1073,6 +1074,11 @@ def generate_clip(clip_id: str):
             fields["own_segment_path"] = None
             fields["tail_frame_paths"] = []
         store.update_clip(video["id"], clip_id, **fields)
+        if status == "done" and output_path:
+            try:
+                _run_concat(video["id"])
+            except Exception:
+                pass
 
     job_id = _job_store.submit(settings, dest_path, on_done, on_queued=mark_queued, on_running=mark_running)
 
@@ -1208,13 +1214,9 @@ def get_clip(video_id: str, clip_id: str):
 
 # ---------------------------------------------------------------- concat --
 
-@app.post("/videos/{video_id}/concat")
-def concat_video(video_id: str):
+def _run_concat(video_id: str) -> dict[str, Any]:
     data = store.load()
-    try:
-        video = store.find_video(data, video_id)
-    except store.NotFound:
-        raise HTTPException(404, "video not found")
+    video = store.find_video(data, video_id)
 
     done_by_order = {
         c["order"]: c
@@ -1222,20 +1224,17 @@ def concat_video(video_id: str):
         if c["status"] == "done" and c.get("output_path")
     }
     if not done_by_order:
-        raise HTTPException(400, "no completed clips to join")
+        return {"concat_output_path": None, "concat_output_url": None}
 
-    # A continuation clip's own output file already contains everything
-    # before it (video_length in "continue from previous" mode is additive
-    # — see AGENTS.md), so joining every done clip's file naively would
-    # replay large stretches of the same footage over and over. Only keep
-    # the LAST clip of each continuous run — i.e. skip a clip whenever the
-    # very next clip (by order) is itself a continuation of it.
     segment_clips = []
     for order, clip in sorted(done_by_order.items()):
         next_clip = done_by_order.get(order + 1)
         if next_clip is not None and next_clip.get("continue_from_previous"):
             continue
         segment_clips.append(clip)
+
+    if not segment_clips:
+        return {"concat_output_path": None, "concat_output_url": None}
 
     video_folder = store.video_dir(video["folder"])
     list_path = video_folder / "concat_list.txt"
@@ -1249,7 +1248,7 @@ def concat_video(video_id: str):
     cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_path), "-c", "copy", str(out_path)]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise HTTPException(500, f"ffmpeg concat failed: {result.stderr[-2000:]}")
+        raise RuntimeError(f"ffmpeg concat failed: {result.stderr[-2000:]}")
 
     def apply(data):
         v = store.find_video(data, video_id)
@@ -1257,3 +1256,16 @@ def concat_video(video_id: str):
 
     store.mutate(apply)
     return {"concat_output_path": str(out_path), "concat_output_url": to_output_url(str(out_path))}
+
+
+@app.post("/videos/{video_id}/concat")
+def concat_video(video_id: str):
+    try:
+        res = _run_concat(video_id)
+        if not res.get("concat_output_path"):
+            raise HTTPException(400, "no completed clips to join")
+        return res
+    except store.NotFound:
+        raise HTTPException(404, "video not found")
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc))

@@ -61,13 +61,17 @@ class NotFound(Exception):
 def _read_all() -> dict[str, Any]:
     VIDEOS_ROOT.mkdir(parents=True, exist_ok=True)
     videos = []
-    for entry in sorted(VIDEOS_ROOT.iterdir()):
+    for entry in VIDEOS_ROOT.iterdir():
         cfg = entry / "config.json"
         if entry.is_dir() and cfg.exists():
             try:
-                videos.append(json.loads(cfg.read_text(encoding="utf-8")))
+                v = json.loads(cfg.read_text(encoding="utf-8"))
+                if "created_at" not in v:
+                    v["created_at"] = entry.stat().st_ctime
+                videos.append(v)
             except json.JSONDecodeError:
                 continue
+    videos.sort(key=lambda v: v.get("created_at", 0), reverse=True)
     return {"videos": videos}
 
 
@@ -102,6 +106,7 @@ def create_video(title: str, template_settings: dict[str, Any], base_prompt: dic
             "id": video_id,
             "folder": folder_name_for(video_id, title),
             "title": title,
+            "created_at": time.time(),
             "template_settings": template_settings,
             "base_prompt": base_prompt,
             "characters": [],

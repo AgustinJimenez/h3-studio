@@ -33,7 +33,7 @@ export default function PromptTagsList() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-16 pt-6">
+    <div className="mx-auto max-w-3xl px-4 pb-52 pt-6">
       <Link to="/" className="inline-flex items-center gap-1"><ArrowLeft size={14} /> Videos</Link>
       <h1 className="mb-1 mt-2 text-2xl font-bold">Prompt Tags</h1>
       <p className="mb-4 text-sm opacity-75">

@@ -115,6 +115,7 @@ export const VideoSchema = z.object({
   id: z.string(),
   folder: z.string(),
   title: z.string(),
+  created_at: z.number().optional(),
   template_settings: z.record(z.string(), z.unknown()).default({}),
   base_prompt: BasePromptSchema.default({ summary: "", overall_soundscape: "", non_diegetic_music: "" }),
   characters: z.array(CharacterSchema).default([]),
@@ -160,6 +161,7 @@ export type AnimateJob = z.infer<typeof AnimateJobSchema>;
 export const VideoSummarySchema = z.object({
   id: z.string(),
   title: z.string(),
+  created_at: z.number().optional(),
   clip_count: z.number(),
   done_count: z.number(),
 });

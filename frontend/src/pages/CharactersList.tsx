@@ -45,7 +45,7 @@ export default function CharactersList() {
   const characters = [...video.characters].sort((a, b) => a.order - b.order);
 
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-16 pt-6">
+    <div className="mx-auto max-w-3xl px-4 pb-52 pt-6">
       <Link to="/videos/$id" params={{ id }} className="inline-flex items-center gap-1"><ArrowLeft size={14} /> {video.title}</Link>
       <h1 className="mb-4 mt-2 text-2xl font-bold">Characters</h1>
 

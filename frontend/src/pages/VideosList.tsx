@@ -32,8 +32,12 @@ export default function VideosList() {
     setPendingDeleteId(id);
   }
 
+  const sortedVideos = videos
+    ? [...videos].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))
+    : [];
+
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-16 pt-6">
+    <div className="mx-auto max-w-3xl px-4 pb-52 pt-6">
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-bold">Videos</h1>
         <div className="flex gap-2">
@@ -67,7 +71,7 @@ export default function VideosList() {
       </form>
 
       <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
-        {videos?.map((v) => (
+        {sortedVideos.map((v) => (
           <Link
             key={v.id}
             to="/videos/$id"
@@ -76,6 +80,16 @@ export default function VideosList() {
           >
             <div className="mb-1 font-semibold text-text-h">{v.title}</div>
             <div className="text-sm opacity-75">{v.done_count}/{v.clip_count} clips done</div>
+            {v.created_at && (
+              <div className="mt-1 text-xs opacity-50">
+                {new Date(v.created_at * 1000).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </div>
+            )}
             <button
               className="mt-2 border-0 bg-transparent p-0 text-danger"
               onClick={(e) => {
@@ -87,7 +101,7 @@ export default function VideosList() {
             </button>
           </Link>
         ))}
-        {videos?.length === 0 && <div className="py-6 opacity-60">No videos yet — create one above.</div>}
+        {sortedVideos.length === 0 && <div className="py-6 opacity-60">No videos yet — create one above.</div>}
       </div>
 
       <ConfirmDialog
