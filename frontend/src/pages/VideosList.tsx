@@ -251,7 +251,7 @@ export default function VideosList() {
                   ) : v.has_running_job ? (
                     <span className="flex items-center gap-1 rounded-md bg-sky-950/80 px-2 py-0.5 text-[11px] font-medium text-sky-300 backdrop-blur-sm border border-sky-500/30">
                       <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-400 animate-ping" />
-                      Rendering
+                      Generating
                     </span>
                   ) : v.done_count > 0 ? (
                     <span className="rounded-md bg-amber-950/80 px-2 py-0.5 text-[11px] font-medium text-amber-300 backdrop-blur-sm border border-amber-500/30">
