@@ -165,14 +165,60 @@ def video_view(video: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _find_thumbnail_url(video: dict[str, Any]) -> str | None:
+    for clip in video.get("clips") or []:
+        if clip.get("tail_frame_paths"):
+            return to_output_url(clip["tail_frame_paths"][0])
+        if clip.get("output_path"):
+            return to_output_url(clip["output_path"])
+    if video.get("concat_output_path"):
+        return to_output_url(video["concat_output_path"])
+    return None
+
+
+def _calculate_total_duration(video: dict[str, Any]) -> float:
+    total = 0.0
+    done_by_order = {
+        c["order"]: c
+        for c in video.get("clips", [])
+        if c["status"] == "done" and c.get("output_path")
+    }
+    for order, clip in done_by_order.items():
+        next_clip = done_by_order.get(order + 1)
+        if next_clip is not None and next_clip.get("continue_from_previous"):
+            continue
+        frames = clip.get("video_length", 124)
+        total += frames / 24.0
+    return round(total, 1)
+
+
 def video_summary(video: dict[str, Any]) -> dict[str, Any]:
-    clips = video["clips"]
+    clips = video.get("clips") or []
+    characters = video.get("characters") or []
+    settings = video.get("template_settings") or {}
+
+    char_names = [c["name"] for c in characters if c.get("name")]
+    char_avatars = []
+    for c in characters:
+        for ref in c.get("references") or []:
+            if ref.get("type") == "image" and ref.get("path"):
+                char_avatars.append(to_output_url(ref["path"]))
+                break
+
     return {
         "id": video["id"],
         "title": video["title"],
         "created_at": video.get("created_at"),
         "clip_count": len(clips),
         "done_count": sum(1 for c in clips if c["status"] == "done"),
+        "thumbnail_url": _find_thumbnail_url(video),
+        "concat_output_url": to_output_url(video.get("concat_output_path")),
+        "resolution": settings.get("resolution", "1280x704"),
+        "model_type": settings.get("model_type", "minimax_h3_ref2va"),
+        "character_names": char_names,
+        "character_avatars": char_avatars[:4],
+        "total_duration_seconds": _calculate_total_duration(video),
+        "has_running_job": any(c.get("status") in ("running", "queued") for c in clips),
     }
 
 

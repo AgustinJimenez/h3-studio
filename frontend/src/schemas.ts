@@ -164,6 +164,14 @@ export const VideoSummarySchema = z.object({
   created_at: z.number().optional(),
   clip_count: z.number(),
   done_count: z.number(),
+  thumbnail_url: z.string().nullable().optional(),
+  concat_output_url: z.string().nullable().optional(),
+  resolution: z.string().nullable().optional(),
+  model_type: z.string().nullable().optional(),
+  character_names: z.array(z.string()).optional().default([]),
+  character_avatars: z.array(z.string().nullable()).optional().default([]),
+  total_duration_seconds: z.number().nullable().optional(),
+  has_running_job: z.boolean().optional().default(false),
 });
 export type VideoSummary = z.infer<typeof VideoSummarySchema>;
 
