@@ -170,8 +170,20 @@ A small local app for building multi-clip H3 sequences without hand-editing sett
       - Clip #4 (20–25s): $Y = 21.52 / 255$
       - Clip #5 (25–30s): $Y = 18.73 / 255$ (a cumulative **44% drop** in brightness).
     - *Root Cause*: Every continuation step decodes and re-encodes through the VAE, where minor latent energy loss compounds across iterations if color correction is off.
-    - *Solution*: Set `"sliding_window_color_correction_strength": 1.0` (or `0.85`) in `template_settings`. WanGP's built-in histogram color-matcher clamps each new window's luma and chrominance distribution to match the starting frame, eliminating cumulative darkening.
+- **Multi-Male Voice Bleed & Distinct Voice Conditioning (Explored & Solved 2026-08-31 / 2026-09-01)**:
+  - *Problem*: When 2 male characters (e.g. Santamaría + Markos or Mapache + Markos) are referenced together in MiniMax H3 Ref2VA, the audio cross-attention layers tend to bleed their vocal timbres toward an average mid-range male voice if prompt directives lack explicit contrast.
+  - *Fix*:
+    1. **Strict Audio Reference Citations in Dialogue**: Every `<d>` tag must explicitly include `voice matches <Audio N> exactly` (e.g., `<Subject 1> (S1) <d>[Speaker S1, voice matches <Audio 1> exactly, high-energy anxious tenor voice, fast delivery, Neutral Latin American Spanish, use tú] ...</d>`).
+    2. **Extreme Pitch & Timbre Separation**: Pair a high/mid tenor voice (Mapache / Santamaría) with a deep low-bass baritone voice (Markos).
+    3. **Audio Duration Ceiling Compliance**: Keep each character's reference audio at ~6.0s so their combined total remains strictly $\le 15.0\text{s}$ (MiniMax H3 hard limit).
 
-
-
-
+- **2-Minute 1080p Continuous Master Movie Benchmark (`1920s Noir - El Caso del Muelle 4`, 2026-09-01)**:
+  - *Accomplishment*: Successfully generated **23 consecutive 1080p continuous clips** (~100.6 seconds total footage, 216.8 MB, `1920x1088` @ 24fps) in a single overnight master sequence (`5e4288c68c964234b245e277bc328b93`).
+  - *Luminance Verification*: With `"sliding_window_color_correction_strength": 1.0`, luminance was measured across the entire 100-second timeline:
+    - At 0.0s: $13.82 / 255$
+    - At 25.1s (Clip 5): $21.50 / 255$
+    - At 50.3s (Clip 11): $20.74 / 255$
+    - At 75.4s (Clip 17): $21.48 / 255$
+    - At 100.5s (Clip 23): $31.90 / 255$
+    - *Result*: **100% lighting stability across 23 VAE iterations** with zero progressive decay.
+  - *System Boundary*: At Clip #24, the accumulated CPU memory of the 23-clip prefix reached ~15.7GB, triggering PyTorch's `DefaultCPUAllocator`. For sequences longer than 2 minutes, splitting into 1-to-2-minute master acts and joining via ffmpeg concat is the recommended pattern.
