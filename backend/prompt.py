@@ -480,7 +480,10 @@ def build_generation_settings(
         if "V" not in image_prompt_type:
             image_prompt_type += "V"
         settings["image_prompt_type"] = image_prompt_type
-        settings["video_source"] = previous_clip["output_path"]
+        # Pass the previous clip's own segment (or output_path if first clip) so WanGP only loads
+        # the required ~5s prefix rather than the entire cumulative history, preventing RAM exhaustion.
+        source_path = previous_clip.get("own_segment_path") or previous_clip.get("output_path")
+        settings["video_source"] = source_path
         keep_frames = clip.get("continuation_keep_frames")
         if keep_frames:
             settings["keep_frames_video_source"] = str(int(keep_frames))
