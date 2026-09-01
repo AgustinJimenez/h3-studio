@@ -1272,14 +1272,14 @@ def _run_concat(video_id: str) -> dict[str, Any]:
     if not done_by_order:
         return {"concat_output_path": None, "concat_output_url": None}
 
-    segment_clips = []
+    segment_files = []
     for order, clip in sorted(done_by_order.items()):
-        next_clip = done_by_order.get(order + 1)
-        if next_clip is not None and next_clip.get("continue_from_previous"):
-            continue
-        segment_clips.append(clip)
+        # Prefer clip's own pristine slice to avoid cumulative re-encoding noise/softening
+        p = clip.get("own_segment_path") or clip.get("output_path")
+        if p and Path(p).is_file():
+            segment_files.append(p)
 
-    if not segment_clips:
+    if not segment_files:
         return {"concat_output_path": None, "concat_output_url": None}
 
     video_folder = store.video_dir(video["folder"])
@@ -1287,11 +1287,14 @@ def _run_concat(video_id: str) -> dict[str, Any]:
     out_path = video_folder / "concat.mp4"
 
     list_path.write_text(
-        "\n".join(f"file '{Path(c['output_path']).resolve().as_posix()}'" for c in segment_clips),
+        "\n".join(f"file '{Path(p).resolve().as_posix()}'" for p in segment_files),
         encoding="utf-8",
     )
 
-    cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_path), "-c", "copy", str(out_path)]
+    import imageio_ffmpeg
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+    cmd = [ffmpeg_exe, "-y", "-f", "concat", "-safe", "0", "-i", str(list_path), "-c", "copy", str(out_path)]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg concat failed: {result.stderr[-2000:]}")
