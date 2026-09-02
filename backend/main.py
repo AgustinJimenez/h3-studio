@@ -1179,33 +1179,29 @@ def unload_model():
     return {"ok": True}
 
 
+def _get_video_duration_seconds(path: str) -> float:
+    import cv2
+    cap = cv2.VideoCapture(str(path))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
+    frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    cap.release()
+    return (frames / fps) if frames and frames > 0 else 0.0
+
+
 def _extract_tail_frames(video: dict[str, Any], clip: dict[str, Any], output_path: str) -> list[str]:
-    """Stills from the literal last ~2s of the clip's own output file, for a
-    quick "did the tail clone/blend a character" check — see AGENTS.md's
-    continuation-chain corruption notes: a clip can look completely clean
-    through 90%+ of its footage and only drift into a clone in its closing
-    frames, which is exactly what becomes the NEXT clip's continuation
-    context if this one is used with continue_from_previous. Turns the
-    established manual practice (ffmpeg -ss <duration-2> ... -vf fps=2) into
-    a one-click check instead of a step to remember every time. Applied to
-    every clip, not just continuation ones — cheap either way. Returns []
-    if extraction fails."""
-    probe = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", str(output_path)],
-        capture_output=True, text=True,
-    )
-    try:
-        duration = float(probe.stdout.strip())
-    except ValueError:
+    """Stills from the literal last ~2s of the clip's own output file."""
+    duration = _get_video_duration_seconds(output_path)
+    if duration <= 0:
         return []
     start = max(0.0, duration - 2.0)
     dest_dir = store.clips_dir(video["folder"])
-    # Clear any stale frames left over from a previous generation of this same clip.
     for stale in dest_dir.glob(f"{clip['id']}_tail_*.jpg"):
         stale.unlink(missing_ok=True)
     pattern = dest_dir / f"{clip['id']}_tail_%02d.jpg"
+    import imageio_ffmpeg
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     result = subprocess.run(
-        ["ffmpeg", "-y", "-ss", str(start), "-i", str(output_path), "-vf", "fps=2", str(pattern)],
+        [ffmpeg_exe, "-y", "-ss", str(start), "-i", str(output_path), "-vf", "fps=2", str(pattern)],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
@@ -1215,31 +1211,21 @@ def _extract_tail_frames(video: dict[str, Any], clip: dict[str, Any], output_pat
 
 def _compute_own_segment_path(video: dict[str, Any], clip: dict[str, Any], output_path: str) -> str | None:
     """A continuation clip's own file spans its whole chain so far (e.g.
-    clip 2 continuing clip 1 = 0-30s, not just its own new 15-30s) — see
-    AGENTS.md's video-continuation notes. For review purposes this trims off
-    the inherited lead-in, purely as a derived preview file; the original
-    full-range file is untouched and still what continuation/bridging/concat
-    use. Returns None if there's nothing to trim (not a continuation clip,
-    or the trim failed) — callers should fall back to the clip's own
-    output_url in that case."""
+    clip 2 continuing clip 1 = 0-30s, not just its own new 15-30s). For review
+    purposes this trims off the inherited lead-in, producing a clean slice."""
     if not clip.get("continue_from_previous"):
         return None
     previous_clip = next((c for c in video.get("clips") or [] if c["order"] == clip["order"] - 1), None)
     if not previous_clip or not previous_clip.get("output_path"):
         return None
-    probe = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", str(previous_clip["output_path"])],
-        capture_output=True, text=True,
-    )
-    try:
-        start = float(probe.stdout.strip())
-    except ValueError:
-        return None
+    start = _get_video_duration_seconds(previous_clip["output_path"])
     if start <= 0:
         return None
     dest = store.clips_dir(video["folder"]) / f"{clip['id']}_own_segment.mp4"
+    import imageio_ffmpeg
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     result = subprocess.run(
-        ["ffmpeg", "-y", "-ss", str(start), "-i", str(output_path), "-c", "copy", str(dest)],
+        [ffmpeg_exe, "-y", "-ss", str(start), "-i", str(output_path), "-c", "copy", str(dest)],
         capture_output=True, text=True,
     )
     if result.returncode != 0 or not dest.exists():
