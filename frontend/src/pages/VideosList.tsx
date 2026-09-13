@@ -3,8 +3,9 @@ import { Link } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, mediaUrl } from "../lib/api";
-import { useVideos, useUnloadModel } from "../lib/queries";
+import { useVideos } from "../lib/queries";
 import ConfirmDialog from "../components/ConfirmDialog";
+import PromptGuideDialog from "../components/PromptGuideDialog";
 import type { VideoSummary } from "../schemas";
 
 type FilterStatus = "all" | "completed" | "in_progress" | "draft";
@@ -13,12 +14,12 @@ type SortOption = "newest" | "oldest" | "clips" | "az";
 export default function VideosList() {
   const { data: videos, error } = useVideos();
   const qc = useQueryClient();
-  const unloadModel = useUnloadModel();
   const [title, setTitle] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
   const [sortBy, setSortBy] = useState<SortOption>("newest");
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const createVideo = useMutation({
     mutationFn: (t: string) => api.createVideo({ title: t }),
@@ -99,15 +100,7 @@ export default function VideosList() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            disabled={unloadModel.isPending}
-            title="Free GPU VRAM (next generation transparently reloads model)"
-            onClick={() => unloadModel.mutate()}
-            className="flex items-center gap-1.5"
-          >
-            <span className="inline-block h-2 w-2 rounded-full bg-accent animate-pulse" />
-            Unload model
-          </button>
+          <button onClick={() => setGuideOpen(true)}>Prompt guide</button>
           <Link to="/animate-jobs">
             <button>Animate jobs</button>
           </Link>
@@ -373,6 +366,7 @@ export default function VideosList() {
         description="All its clips, characters, and settings will be permanently removed. Generated video files will remain on disk."
         onConfirm={() => pendingDeleteId && deleteVideo.mutate(pendingDeleteId)}
       />
+      <PromptGuideDialog open={guideOpen} onOpenChange={setGuideOpen} />
     </div>
   );
 }

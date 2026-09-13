@@ -1,4 +1,5 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
+import TopNav from "./components/TopNav";
 import VideosList from "./pages/VideosList";
 import VideoDetail from "./pages/VideoDetail";
 import CharactersList from "./pages/CharactersList";
@@ -7,7 +8,12 @@ import PromptTagsList from "./pages/PromptTagsList";
 import AnimateJobs from "./pages/AnimateJobs";
 
 const rootRoute = createRootRoute({
-  component: () => <Outlet />,
+  component: () => (
+    <>
+      <TopNav />
+      <Outlet />
+    </>
+  ),
 });
 
 const videosListRoute = createRoute({

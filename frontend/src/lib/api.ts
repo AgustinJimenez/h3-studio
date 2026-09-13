@@ -4,6 +4,7 @@ import {
   CharacterSchema,
   ClipSchema,
   OptionsSchema,
+  ModelStatusSchema,
   PromptTagSchema,
   AnimateJobSchema,
   type Video,
@@ -11,6 +12,7 @@ import {
   type Character,
   type Clip,
   type Options,
+  type ModelStatus,
   type PromptTag,
   type AnimateJob,
   type QaReport,
@@ -70,6 +72,9 @@ export const api = {
   generateClip: (clipId: string) => request<{ job_id: string; status: string }>(`/clips/${clipId}/generate`, { method: "POST" }),
   analyzeClip: (clipId: string): Promise<QaReport> => request(`/clips/${clipId}/analyze`, { method: "POST" }),
   unloadModel: () => request<{ ok: boolean }>("/unload-model", { method: "POST" }),
+  getModelStatus: async (): Promise<ModelStatus> => ModelStatusSchema.parse(await request("/model-status")),
+  loadModel: (modelType: string) =>
+    request<{ ok: boolean; model_type: string }>("/load-model", { method: "POST", body: JSON.stringify({ model_type: modelType }) }),
   concatVideo: async (videoId: string): Promise<Video> =>
     VideoSchema.parse(await request(`/videos/${videoId}/concat`, { method: "POST" })),
 

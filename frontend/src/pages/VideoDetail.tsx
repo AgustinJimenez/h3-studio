@@ -22,6 +22,7 @@ import StatusBadge from "../components/StatusBadge";
 import GenerationParams from "../components/GenerationParams";
 import ReferenceThumb from "../components/ReferenceThumb";
 import ConfirmDialog from "../components/ConfirmDialog";
+import PromptGuideDialog from "../components/PromptGuideDialog";
 import ShotPromptEditor from "../components/ShotPromptEditor";
 import type { Clip, BasePrompt, ModelTag, QaReport, Character } from "../schemas";
 
@@ -53,6 +54,7 @@ export default function VideoDetail() {
   const analyzeClip = useAnalyzeClip(id);
   const concatVideo = useConcatVideo(id);
 
+  const [descriptionDraft, setDescriptionDraft] = useState<string | null>(null);
   const [basePromptDraft, setBasePromptDraft] = useState<BasePrompt | null>(null);
   const [templateDraft, setTemplateDraft] = useState<Record<string, unknown> | null>(null);
   const [newClip, setNewClip] = useState<{ shot_prompt: string; seed: number; video_length: number }>({
@@ -62,10 +64,12 @@ export default function VideoDetail() {
   });
   const [collapseSignal, setCollapseSignal] = useState<{ action: "collapse" | "expand"; token: number } | null>(null);
   const [pendingDeleteClipId, setPendingDeleteClipId] = useState<string | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   if (error) return <div className="mx-auto max-w-4xl px-4 py-6 text-danger">{error.message}</div>;
   if (!video) return <div className="mx-auto max-w-4xl px-4 py-6">Loading...</div>;
 
+  const description = descriptionDraft ?? video.description ?? "";
   const basePrompt = basePromptDraft ?? video.base_prompt;
   const templateSettings = templateDraft ?? video.template_settings;
 
@@ -77,6 +81,10 @@ export default function VideoDetail() {
   // *output files* grow cumulatively, but the setting itself stays per-clip) — so the timeline total
   // is the sum across done clips, not the last clip's value alone.
   const doneFramesSoFar = sortedClips.filter((c) => c.status === "done").reduce((sum, c) => sum + c.video_length, 0);
+
+  function saveDescription() {
+    updateVideo.mutate({ description });
+  }
 
   function saveBasePrompt() {
     updateVideo.mutate({ base_prompt: basePrompt });
@@ -120,8 +128,22 @@ export default function VideoDetail() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 pb-52 pt-6">
-      <Link to="/" className="inline-flex items-center gap-1"><ArrowLeft size={14} /> Videos</Link>
+      <div className="flex items-center justify-between">
+        <Link to="/" className="inline-flex items-center gap-1"><ArrowLeft size={14} /> Videos</Link>
+        <button onClick={() => setGuideOpen(true)}>Prompt guide</button>
+      </div>
       <h1 className="mb-4 mt-2 text-2xl font-bold">{video.title}</h1>
+
+      <label className="mb-3 flex flex-col gap-1 text-sm">
+        Description <span className="font-normal text-text-muted">(what this video is about, for anyone opening the project)</span>
+        <textarea
+          rows={2}
+          placeholder="e.g. A noir detective interrogates a suspect in his office, ending with a confession."
+          value={description}
+          onChange={(e) => setDescriptionDraft(e.target.value)}
+          onBlur={saveDescription}
+        />
+      </label>
 
       <details className="mb-3 rounded-lg border border-border bg-bg-alt p-3.5">
         <summary className="cursor-pointer font-semibold text-text-h">Base prompt (shared across all clips)</summary>
@@ -333,6 +355,7 @@ export default function VideoDetail() {
         title="Delete this clip?"
         onConfirm={confirmRemoveClip}
       />
+      <PromptGuideDialog open={guideOpen} onOpenChange={setGuideOpen} />
     </div>
   );
 }

@@ -99,13 +99,14 @@ def mutate(fn: Callable[[dict[str, Any]], Any]) -> Any:
         return result
 
 
-def create_video(title: str, template_settings: dict[str, Any], base_prompt: dict[str, Any]) -> dict[str, Any]:
+def create_video(title: str, template_settings: dict[str, Any], base_prompt: dict[str, Any], description: str = "") -> dict[str, Any]:
     with _LOCK:
         video_id = new_id()
         video = {
             "id": video_id,
             "folder": folder_name_for(video_id, title),
             "title": title,
+            "description": description,
             "created_at": time.time(),
             "template_settings": template_settings,
             "base_prompt": base_prompt,

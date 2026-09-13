@@ -157,10 +157,31 @@ export function useAnalyzeClip(videoId: string) {
 }
 
 export function useUnloadModel() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.unloadModel(),
-    onSuccess: () => toast.success("Model unloaded"),
+    onSuccess: () => {
+      toast.success("Model unloaded");
+      qc.invalidateQueries({ queryKey: ["modelStatus"] });
+    },
     onError: (err: Error) => toast.error(err.message),
+  });
+}
+
+export function useModelStatus() {
+  return useQuery({ queryKey: ["modelStatus"], queryFn: api.getModelStatus, refetchInterval: 5000 });
+}
+
+export function useLoadModel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (modelType: string) => api.loadModel(modelType),
+    onMutate: (modelType: string) => toast.loading(`Loading ${modelType}...`),
+    onSuccess: (data, _modelType, toastId) => {
+      toast.success(`Loaded ${data.model_type}`, { id: toastId as string | number });
+      qc.invalidateQueries({ queryKey: ["modelStatus"] });
+    },
+    onError: (err: Error, _modelType, toastId) => toast.error(err.message, { id: toastId as string | number }),
   });
 }
 

@@ -115,6 +115,7 @@ export const VideoSchema = z.object({
   id: z.string(),
   folder: z.string(),
   title: z.string(),
+  description: z.string().optional().default(""),
   created_at: z.number().optional(),
   template_settings: z.record(z.string(), z.unknown()).default({}),
   base_prompt: BasePromptSchema.default({ summary: "", overall_soundscape: "", non_diegetic_music: "" }),
@@ -194,3 +195,8 @@ export const OptionsSchema = z.object({
   memory_profiles: z.array(ChoiceSchema),
 });
 export type Options = z.infer<typeof OptionsSchema>;
+
+export const ModelStatusSchema = z.object({
+  model_type: z.string().nullable(),
+});
+export type ModelStatus = z.infer<typeof ModelStatusSchema>;

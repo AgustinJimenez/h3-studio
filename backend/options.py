@@ -35,11 +35,19 @@ def get_generation_options(session: Any, model_type: str | None = None) -> dict[
         if REF2VA_SUBSTR in str(d.get("model_type") or "")
         and FL2VA_SUBSTR not in str(d.get("model_type") or "")
     ]
+    def _filenames(urls: Any) -> list[str]:
+        # A model_def's "URLs" is usually a list of checkpoint URLs, but WanGP
+        # also allows a plain string meaning "inherit this other model_type's
+        # weights" (e.g. the PDD variants reusing minimax_h3_ref2va's files).
+        if urls is None:
+            return []
+        return [urls] if isinstance(urls, str) else list(urls)
+
     model_types = [
         {
             "model_type": d["model_type"],
             "name": d.get("name", d["model_type"]),
-            "model_filenames": d.get("URLs") or [],
+            "model_filenames": _filenames(d.get("URLs")),
         }
         for d in ref2va_defs
     ]

@@ -226,12 +226,14 @@ def video_summary(video: dict[str, Any]) -> dict[str, Any]:
 
 class VideoCreate(BaseModel):
     title: str
+    description: Optional[str] = None
     template_settings: Optional[dict[str, Any]] = None
     base_prompt: Optional[dict[str, str]] = None
 
 
 class VideoUpdate(BaseModel):
     title: Optional[str] = None
+    description: Optional[str] = None
     template_settings: Optional[dict[str, Any]] = None
     base_prompt: Optional[dict[str, str]] = None
 
@@ -398,6 +400,7 @@ def list_videos():
 def create_video(body: VideoCreate):
     video = store.create_video(
         title=body.title,
+        description=body.description or "",
         template_settings={**prompt.DEFAULT_TEMPLATE_SETTINGS, **(body.template_settings or {})},
         base_prompt={**prompt.DEFAULT_BASE_PROMPT, **(body.base_prompt or {})},
     )
@@ -420,6 +423,8 @@ def update_video(video_id: str, body: VideoUpdate):
         video = store.find_video(data, video_id)
         if body.title is not None:
             video["title"] = body.title
+        if body.description is not None:
+            video["description"] = body.description
         if body.template_settings is not None:
             video["template_settings"] = {**video["template_settings"], **body.template_settings}
         if body.base_prompt is not None:
@@ -1177,6 +1182,30 @@ def unload_model():
         raise HTTPException(409, "a generation is currently running; try again once it finishes")
     _session.release_model()
     return {"ok": True}
+
+
+class LoadModelRequest(BaseModel):
+    model_type: str
+
+
+@app.get("/model-status")
+def model_status():
+    if _session is None:
+        raise HTTPException(503, "server still starting up")
+    return {"model_type": _session.get_current_model_type()}
+
+
+@app.post("/load-model")
+def load_model(body: LoadModelRequest):
+    """Preloads a model into GPU/RAM ahead of the first generation that
+    needs it (see shared/api.py::WanGPSession.preload_model). Guarded the
+    same way as /unload-model so it can't race an active generation."""
+    if _session is None or _job_store is None:
+        raise HTTPException(503, "server still starting up")
+    if _job_store.is_busy():
+        raise HTTPException(409, "a generation is currently running; try again once it finishes")
+    _session.preload_model(body.model_type)
+    return {"ok": True, "model_type": body.model_type}
 
 
 def _get_video_duration_seconds(path: str) -> float:
