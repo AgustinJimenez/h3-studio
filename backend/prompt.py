@@ -41,11 +41,20 @@ DEFAULT_BASE_PROMPT = {
 # Known-good defaults, taken from the proven mansion-entrance debug settings
 # (prompts_reference/mansion_entrance/settings_full_model_debug320p.json).
 # A video's template_settings overrides whatever it specifies on top of this.
+# IN-PROGRESS EXPERIMENT (2026-09-13): defaulted to the 8-step PDD pruned
+# checkpoint instead of the standard 20-step Ref2VA to test speed vs.
+# quality trade-off (~39% faster on a single test: 206s vs 338s at 540p,
+# same character/prompt, no visible quality regression). Not yet validated
+# across multiple characters/scenes/resolutions -- if quality issues show up
+# in broader use, revert model_type/model_filename/num_inference_steps/
+# guidance_phases to the minimax_h3_ref2va values (see git history for this
+# file, or defaults/minimax_h3_ref2va.json's int8_convrot URL).
 DEFAULT_TEMPLATE_SETTINGS = {
-    "model_type": "minimax_h3_ref2va",
-    "model_filename": "https://huggingface.co/DeepBeepMeep/MiniMax-H3/resolve/main/MiniMax-H3-Ref2VA_int8_convrot.safetensors",
+    "model_type": "minimax_h3_ref2va_pruned_pdd",
+    "model_filename": "https://huggingface.co/DeepBeepMeep/MiniMax-H3/resolve/main/MiniMax-H3-Ref2VA-pruned_rank8_int8_convrot.safetensors",
     "resolution": "1280x704",
-    "num_inference_steps": 20,
+    "num_inference_steps": 8,
+    "guidance_phases": 1,
     "flow_shift": 12.0,
     "sample_solver": "euler",
     "skip_steps_cache_type": "first_block",

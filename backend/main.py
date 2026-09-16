@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -50,7 +50,11 @@ app = FastAPI(title="H3 Clip Video Editor")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    # Matches this app's own frontend dev server on any host (localhost, a
+    # LAN IP like 192.168.x.x, ...) so opening the app from another device
+    # on the network -- e.g. a Mac reaching http://<this-pc-ip>:5173 -- isn't
+    # blocked by CORS. Still scoped to port 5173 specifically, not "*".
+    allow_origin_regex=r"http://.*:5173$",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -117,11 +121,13 @@ def clip_view(clip: dict[str, Any]) -> dict[str, Any]:
     # the full output when there's nothing to trim (not a continuation clip).
     own_segment_url = to_output_url(clip.get("own_segment_path")) or to_output_url(clip.get("output_path"))
     tail_frame_urls = [url for p in (clip.get("tail_frame_paths") or []) if (url := to_output_url(p))]
+    upscale = clip.get("upscale") or {}
     return {
         **clip,
         "output_url": to_output_url(clip.get("output_path")),
         "own_segment_url": own_segment_url,
         "tail_frame_urls": tail_frame_urls,
+        "upscale": {**upscale, "output_url": to_output_url(upscale.get("output_path"))} if upscale else upscale,
     }
 
 
@@ -147,6 +153,11 @@ def character_view(character: dict[str, Any]) -> dict[str, Any]:
         **character,
         "references": [reference_view(r) for r in character.get("references") or []],
         "reference_videos": [reference_video_view(rv) for rv in character.get("reference_videos") or []],
+        # Same numbering build_reference_video_settings actually uses (a
+        # solo [character] list, not the whole video's roster) -- so the
+        # reference-video studio's prompt fields can offer the right
+        # <Subject 1>/<Picture N> tags for this character in isolation.
+        "model_tags": prompt.compose_model_tags([character]),
     }
 
 
@@ -736,6 +747,47 @@ def add_reference(video_id: str, character_id: str, body: ReferenceCreate):
     return character_view(character)
 
 
+@app.post("/videos/{video_id}/characters/{character_id}/references/upload")
+async def upload_reference(
+    video_id: str,
+    character_id: str,
+    ref_type: str = Form(..., alias="type"),
+    note: str = Form(""),
+    file: UploadFile = File(...),
+):
+    """Same as POST .../references, but for a file the user picked from their
+    own machine rather than an existing path already on this server -- saves
+    it under this character's own data folder (same convention as captured
+    reference-video frames/upscales) and registers it with that saved path."""
+    if ref_type not in ("image", "video", "audio"):
+        raise HTTPException(400, "type must be 'image', 'video', or 'audio'")
+
+    data = store.load()
+    try:
+        video = store.find_video(data, video_id)
+    except store.NotFound:
+        raise HTTPException(404, "video not found")
+
+    characters_dir = store.characters_dir(video["folder"])
+    characters_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", file.filename or "upload")
+    dest_path = characters_dir / f"{character_id}_upload_{store.new_id()}_{safe_name}"
+    dest_path.write_bytes(await file.read())
+
+    def apply(data):
+        video = store.find_video(data, video_id)
+        character = store.find_character(video, character_id)
+        reference = {"id": store.new_id(), "type": ref_type, "path": str(dest_path), "note": note, "depth_transfer": False}
+        character.setdefault("references", []).append(reference)
+        return character
+
+    try:
+        character = store.mutate(apply)
+    except store.NotFound:
+        raise HTTPException(404, "video or character not found")
+    return character_view(character)
+
+
 @app.delete("/videos/{video_id}/characters/{character_id}/references/{reference_id}")
 def delete_reference(video_id: str, character_id: str, reference_id: str):
     def apply(data):
@@ -1130,6 +1182,46 @@ def generate_clip(clip_id: str):
                 _run_concat(video["id"])
             except Exception:
                 pass
+
+    job_id = _job_store.submit(settings, dest_path, on_done, on_queued=mark_queued, on_running=mark_running)
+
+    return {"job_id": job_id, "status": "queued"}
+
+
+@app.post("/clips/{clip_id}/upscale")
+def upscale_clip(clip_id: str):
+    """FlashVSR-upscales one finished story clip in place-ish (never
+    overwrites the raw output; a sibling `upscale: {status, output_path,
+    ...}` sub-dict is attached, same pattern as reference-video/reference
+    upscaling above). Useful when clips in this video aren't being
+    concatenated into one final output -- each clip is its own deliverable,
+    so each needs its own upscale pass rather than one upscale-after-concat
+    step."""
+    if _job_store is None:
+        raise HTTPException(503, "server still starting up")
+
+    data = store.load()
+    try:
+        video, clip = store.find_clip_anywhere(data, clip_id)
+    except store.NotFound:
+        raise HTTPException(404, "clip not found")
+
+    src_path = clip.get("output_path")
+    if not src_path:
+        raise HTTPException(400, "clip has no completed output to upscale")
+
+    output_filename = f"{video['id']}_clip_{clip_id}_upscaled"
+    settings = prompt.build_upscale_settings(src_path, output_filename, scale=1.5)
+    dest_path = store.clips_dir(video["folder"]) / f"{clip_id}_upscaled.mp4"
+
+    def mark_queued(job_id: str) -> None:
+        store.update_clip_upscale(video["id"], clip_id, status="queued", job_id=job_id, error=None, last_generation_settings=settings)
+
+    def mark_running() -> None:
+        store.update_clip_upscale(video["id"], clip_id, status="running")
+
+    def on_done(status: str, output_path: str | None, error: str | None, duration_seconds: float | None = None) -> None:
+        store.update_clip_upscale(video["id"], clip_id, status=status, output_path=output_path, error=error, generation_duration_seconds=duration_seconds)
 
     job_id = _job_store.submit(settings, dest_path, on_done, on_queued=mark_queued, on_running=mark_running)
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useOptions, useModelStatus, useLoadModel, useUnloadModel } from "../lib/queries";
 
@@ -8,14 +8,19 @@ export default function TopNav() {
   const loadModel = useLoadModel();
   const unloadModel = useUnloadModel();
   const [selected, setSelected] = useState<string>("");
+  const userPicked = useRef(false);
 
   const modelTypes = options?.model_types ?? [];
   const loadedModelType = status?.model_type ?? null;
   const loadedModel = modelTypes.find((m) => m.model_type === loadedModelType);
 
+  // Follow whatever's actually loaded until the user manually picks a model
+  // themselves -- options and model-status resolve independently, so this
+  // can't just be a one-time "if nothing selected yet" default.
   useEffect(() => {
-    if (!selected && modelTypes.length > 0) setSelected(loadedModelType ?? modelTypes[0].model_type);
-  }, [modelTypes, loadedModelType, selected]);
+    if (userPicked.current || modelTypes.length === 0) return;
+    setSelected(loadedModelType ?? modelTypes[0].model_type);
+  }, [modelTypes, loadedModelType]);
 
   return (
     <div className="sticky top-0 z-40 flex flex-nowrap items-center gap-3 overflow-x-auto whitespace-nowrap border-b border-border bg-bg px-4 py-1.5 text-sm">
@@ -34,7 +39,10 @@ export default function TopNav() {
 
         <select
           value={selected}
-          onChange={(e) => setSelected(e.target.value)}
+          onChange={(e) => {
+            userPicked.current = true;
+            setSelected(e.target.value);
+          }}
           className="rounded-lg border border-border bg-bg-alt px-2.5 py-1 text-xs text-text-h"
         >
           {modelTypes.map((m) => (

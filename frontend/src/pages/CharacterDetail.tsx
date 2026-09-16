@@ -6,7 +6,7 @@ import { mediaUrl } from "../lib/api";
 import {
   useCharacter,
   useUpdateCharacter,
-  useAddReference,
+  useUploadReference,
   useDeleteReference,
   useUpscaleReference,
   useCreateReferenceVideo,
@@ -21,9 +21,11 @@ import ReferenceThumb from "../components/ReferenceThumb";
 import StatusBadge from "../components/StatusBadge";
 import GenerationParams from "../components/GenerationParams";
 import RetentionSelect from "../components/RetentionSelect";
-import type { ReferenceVideo } from "../schemas";
+import ShotPromptEditor from "../components/ShotPromptEditor";
+import type { ReferenceVideo, ModelTag } from "../schemas";
 
 const REFERENCE_TYPES = ["image", "video", "audio"] as const;
+const ACCEPT_BY_REFERENCE_TYPE: Record<string, string> = { image: "image/*", video: "video/*", audio: "audio/*" };
 const ACTIVE_STATUSES = new Set(["queued", "running"]);
 
 type CharacterFieldsForm = {
@@ -38,16 +40,16 @@ export default function CharacterDetail() {
   const { data: character, error } = useCharacter(id, characterId);
 
   const updateCharacter = useUpdateCharacter(id, characterId);
-  const addReference = useAddReference(id, characterId);
+  const uploadReference = useUploadReference(id, characterId);
   const deleteReference = useDeleteReference(id, characterId);
   const upscaleReference = useUpscaleReference(id, characterId);
   const createReferenceVideo = useCreateReferenceVideo(id, characterId);
   const deleteReferenceVideo = useDeleteReferenceVideo(id, characterId);
 
-  const [newRefDraft, setNewRefDraft] = useState({ type: "image" as string, path: "", note: "" });
+  const [newRefDraft, setNewRefDraft] = useState({ type: "image" as string, note: "" });
   const [newRvName, setNewRvName] = useState("");
 
-  const { register, control, reset, handleSubmit } = useForm<CharacterFieldsForm>({
+  const { register, control } = useForm<CharacterFieldsForm>({
     values: character
       ? {
           name: character.name,
@@ -65,9 +67,14 @@ export default function CharacterDetail() {
     updateCharacter.mutate(fields);
   }
 
-  function addRef() {
-    if (!newRefDraft.path.trim()) return;
-    addReference.mutate(newRefDraft, { onSuccess: () => setNewRefDraft({ type: "image", path: "", note: "" }) });
+  function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    uploadReference.mutate(
+      { type: newRefDraft.type, file, note: newRefDraft.note },
+      { onSuccess: () => setNewRefDraft({ type: newRefDraft.type, note: "" }) }
+    );
   }
 
   function addRv() {
@@ -79,11 +86,11 @@ export default function CharacterDetail() {
       <Link to="/videos/$id/characters" params={{ id }} className="inline-flex items-center gap-1"><ArrowLeft size={14} /> Characters</Link>
       <h1 className="mb-4 mt-2 text-2xl font-bold">Subject {character.order + 1}: {character.name || "(unnamed)"}</h1>
 
-      <form onBlur={handleSubmit(saveFields)} onSubmit={(e) => e.preventDefault()}>
+      <div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
           <label className="flex flex-col gap-1 text-sm">
             Name
-            <input {...register("name")} onBlur={() => reset(undefined, { keepValues: true })} />
+            <input {...register("name")} onBlur={(e) => saveFields({ name: e.target.value })} />
           </label>
           <label className="flex flex-col gap-1 text-sm">
             Retention
@@ -104,7 +111,12 @@ export default function CharacterDetail() {
         </div>
         <label className="mt-3 flex flex-col gap-1 text-sm">
           Identity description (physical traits to preserve)
-          <textarea rows={2} placeholder="his exact facial identity, beard, hair, and build" {...register("identity_description")} />
+          <textarea
+            rows={2}
+            placeholder="his exact facial identity, beard, hair, and build"
+            {...register("identity_description")}
+            onBlur={(e) => saveFields({ identity_description: e.target.value })}
+          />
         </label>
         <label className="mt-3 flex flex-col gap-1 text-sm">
           Wardrobe / props for this video
@@ -112,37 +124,47 @@ export default function CharacterDetail() {
             rows={2}
             placeholder="For this video he wears a tie-dye windbreaker and cargo pants, and holds a flashlight."
             {...register("wardrobe_notes")}
+            onBlur={(e) => saveFields({ wardrobe_notes: e.target.value })}
           />
         </label>
-      </form>
+      </div>
 
       <h2 className="mb-1 mt-5 text-xl font-bold">References</h2>
       <p className="mb-2 text-sm opacity-75">
         This is the resource list the main pipeline actually draws from when composing a generation (identity
         photos, wardrobe/style images, voice/motion clips, and any frames captured below).
       </p>
-      <div className="mt-1 flex flex-col gap-1.5 border-t border-dashed border-border pt-2">
-        {character.references.map((ref) => (
-          <div key={ref.id} className="flex items-center gap-2.5">
-            <ReferenceThumb type={ref.type} path={ref.upscale?.status === "done" ? ref.upscale.output_path : ref.path} />
-            <span className="rounded-full bg-status-draft px-2 py-0.5 text-xs uppercase text-white">{ref.type}</span>
-            <span className="flex-1 overflow-hidden text-ellipsis font-mono text-xs opacity-85">
-              {ref.path}
-              {ref.note && <div className="text-accent opacity-100">note: {ref.note}</div>}
+      <div className="mt-1 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3 border-t border-dashed border-border pt-3">
+        {character.references.map((ref) => {
+          const filename = ref.path.split(/[\\/]/).pop() || ref.path;
+          return (
+            <div key={ref.id} className="flex flex-col gap-2 rounded-lg border border-border bg-bg-alt p-2.5">
+              <span className="w-fit rounded-full bg-status-draft px-2 py-0.5 text-xs uppercase text-white">{ref.type}</span>
+              {ref.type === "audio" ? (
+                <ReferenceThumb type={ref.type} path={ref.upscale?.status === "done" ? ref.upscale.output_path : ref.path} />
+              ) : (
+                <ReferenceThumb size="lg" type={ref.type} path={ref.upscale?.status === "done" ? ref.upscale.output_path : ref.path} />
+              )}
+              <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs opacity-85" title={ref.path}>
+                {filename}
+              </span>
+              {ref.note && <div className="text-xs text-accent">note: {ref.note}</div>}
               {ref.upscale?.status && ref.upscale.status !== "none" && (
-                <div className="text-accent opacity-100">
+                <div className="text-xs text-accent">
                   upscale: {ref.upscale.status}{ref.upscale.error ? ` — ${ref.upscale.error}` : ""}
                 </div>
               )}
-            </span>
-            {ref.type === "image" && (
-              <button disabled={ACTIVE_STATUSES.has(ref.upscale?.status ?? "")} onClick={() => upscaleReference.mutate(ref.id)}>
-                {ref.upscale?.status === "done" ? "Re-upscale" : "Upscale"}
-              </button>
-            )}
-            <button className="border-0 bg-transparent p-0 text-danger" onClick={() => deleteReference.mutate(ref.id)}>Remove</button>
-          </div>
-        ))}
+              <div className="mt-auto flex items-center gap-2 pt-1">
+                {ref.type === "image" && (
+                  <button disabled={ACTIVE_STATUSES.has(ref.upscale?.status ?? "")} onClick={() => upscaleReference.mutate(ref.id)}>
+                    {ref.upscale?.status === "done" ? "Re-upscale" : "Upscale"}
+                  </button>
+                )}
+                <button className="border-0 bg-transparent p-0 text-danger" onClick={() => deleteReference.mutate(ref.id)}>Remove</button>
+              </div>
+            </div>
+          );
+        })}
         <div className="flex flex-wrap items-end gap-3">
           <select value={newRefDraft.type} onChange={(e) => setNewRefDraft({ ...newRefDraft, type: e.target.value })} className="w-auto">
             {REFERENCE_TYPES.map((t) => (
@@ -150,18 +172,20 @@ export default function CharacterDetail() {
             ))}
           </select>
           <input
-            placeholder="Full file path..."
-            value={newRefDraft.path}
-            onChange={(e) => setNewRefDraft({ ...newRefDraft, path: e.target.value })}
-            className="max-w-xs"
-          />
-          <input
             placeholder="Optional note, e.g. 'wardrobe and costume style reference' — leave blank if this is a normal identity reference"
             value={newRefDraft.note}
             onChange={(e) => setNewRefDraft({ ...newRefDraft, note: e.target.value })}
             className="max-w-sm"
           />
-          <button onClick={addRef}>Add reference</button>
+          <label className="flex flex-col gap-1 text-sm">
+            <input
+              type="file"
+              accept={ACCEPT_BY_REFERENCE_TYPE[newRefDraft.type]}
+              disabled={uploadReference.isPending}
+              onChange={handleFileSelected}
+            />
+          </label>
+          {uploadReference.isPending && <span className="text-xs opacity-75">Uploading…</span>}
         </div>
       </div>
 
@@ -181,6 +205,7 @@ export default function CharacterDetail() {
             videoId={id}
             characterId={characterId}
             rv={rv}
+            modelTags={character.model_tags}
             isActive={character.active_reference_video_id === rv.id}
             onActivate={() => updateCharacter.mutate({ active_reference_video_id: rv.id })}
             onDeactivate={() => updateCharacter.mutate({ active_reference_video_id: "" })}
@@ -206,6 +231,7 @@ function ReferenceVideoCard({
   videoId,
   characterId,
   rv,
+  modelTags,
   isActive,
   onActivate,
   onDeactivate,
@@ -214,6 +240,7 @@ function ReferenceVideoCard({
   videoId: string;
   characterId: string;
   rv: ReferenceVideo;
+  modelTags: ModelTag[];
   isActive: boolean;
   onActivate: () => void;
   onDeactivate: () => void;
@@ -262,49 +289,45 @@ function ReferenceVideoCard({
         Name
         <input value={draft.name || ""} onChange={(e) => setDraft({ ...draft, name: e.target.value })} onBlur={saveDraft} />
       </label>
-      <label className="mt-2 flex flex-col gap-1 text-sm">
+      <div className="mt-2 flex flex-col gap-1 text-sm">
         Style (rendering style — realistic vs. cartoon, color grading, grain; reusable across everything)
-        <textarea
-          rows={2}
-          placeholder="Photorealistic, cinematic color grading, natural film grain, realistic skin texture and lighting, no over-smoothing or plastic look, no cartoon or illustrated rendering anywhere in the shot."
-          value={draft.style_prompt || ""}
-          onChange={(e) => setDraft({ ...draft, style_prompt: e.target.value })}
+        <ShotPromptEditor
+          initialValue={rv.style_prompt || ""}
+          modelTags={modelTags}
+          onChange={(next) => setDraft({ ...draft, style_prompt: next })}
           onBlur={saveDraft}
         />
-      </label>
-      <label className="mt-2 flex flex-col gap-1 text-sm">
+      </div>
+      <div className="mt-2 flex flex-col gap-1 text-sm">
         Environment / ambient (background, lighting — usually reusable across shots/characters)
-        <textarea
-          rows={2}
-          placeholder="Plain seamless white studio background, evenly lit with soft, shadowless studio lighting, no props, no other objects in frame."
-          value={draft.environment_prompt || ""}
-          onChange={(e) => setDraft({ ...draft, environment_prompt: e.target.value })}
+        <ShotPromptEditor
+          initialValue={rv.environment_prompt || ""}
+          modelTags={modelTags}
+          onChange={(next) => setDraft({ ...draft, environment_prompt: next })}
           onBlur={saveDraft}
         />
-      </label>
-      <label className="mt-2 flex flex-col gap-1 text-sm">
+      </div>
+      <div className="mt-2 flex flex-col gap-1 text-sm">
         Character aspect (expression, stance, demeanor — no timing, reusable across different actions)
-        <textarea
-          rows={2}
-          placeholder="Calm, neutral expression, standing straight, arms relaxed at the sides."
-          value={draft.character_prompt || ""}
-          onChange={(e) => setDraft({ ...draft, character_prompt: e.target.value })}
+        <ShotPromptEditor
+          initialValue={rv.character_prompt || ""}
+          modelTags={modelTags}
+          onChange={(next) => setDraft({ ...draft, character_prompt: next })}
           onBlur={saveDraft}
         />
-      </label>
-      <label className="mt-2 flex flex-col gap-1 text-sm">
+      </div>
+      <div className="mt-2 flex flex-col gap-1 text-sm">
         Action (shot structure — framing, camera cuts/timing, dialogue; the part that usually changes every time)
-        <textarea
-          rows={3}
-          placeholder="[Shot 1] Close-up on the face, speaking to camera... [Shot 2] At 00:0X.000, camera cuts to a wider shot showing the full body..."
-          value={draft.action_prompt || ""}
-          onChange={(e) => setDraft({ ...draft, action_prompt: e.target.value })}
+        <ShotPromptEditor
+          initialValue={rv.action_prompt || ""}
+          modelTags={modelTags}
+          onChange={(next) => setDraft({ ...draft, action_prompt: next })}
           onBlur={saveDraft}
         />
         <span className={wordCountClass(wordCount(draft.action_prompt))}>
           {wordCount(draft.action_prompt)} / {WORD_TARGET_MIN}-{WORD_TARGET_MAX} words
         </span>
-      </label>
+      </div>
       <div className="mt-2 flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-sm">
           Seed

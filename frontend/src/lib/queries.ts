@@ -221,6 +221,16 @@ export function useAddReference(videoId: string, characterId: string) {
   });
 }
 
+export function useUploadReference(videoId: string, characterId: string) {
+  const invalidate = useInvalidateCharacter(videoId, characterId);
+  return useMutation({
+    mutationFn: ({ type, file, note }: { type: string; file: File; note?: string }) =>
+      api.uploadReference(videoId, characterId, type, file, note),
+    onSuccess: invalidate,
+    onError: (err: Error) => toast.error(err.message),
+  });
+}
+
 export function useDeleteReference(videoId: string, characterId: string) {
   const invalidate = useInvalidateCharacter(videoId, characterId);
   return useMutation({

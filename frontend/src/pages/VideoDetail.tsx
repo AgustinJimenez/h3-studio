@@ -3,7 +3,7 @@ import { Link, useParams } from "@tanstack/react-router";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronDown, ChevronRight, ArrowLeft } from "lucide-react";
+import { ChevronDown, ChevronRight, ArrowLeft, MoreHorizontal, List as ListIcon, GalleryHorizontal } from "lucide-react";
 import { mediaUrl } from "../lib/api";
 import {
   useVideo,
@@ -24,6 +24,7 @@ import ReferenceThumb from "../components/ReferenceThumb";
 import ConfirmDialog from "../components/ConfirmDialog";
 import PromptGuideDialog from "../components/PromptGuideDialog";
 import ShotPromptEditor from "../components/ShotPromptEditor";
+import ClipCarousel from "../components/ClipCarousel";
 import type { Clip, BasePrompt, ModelTag, QaReport, Character } from "../schemas";
 
 const ACTIVE_STATUSES = new Set(["queued", "running"]);
@@ -65,6 +66,13 @@ export default function VideoDetail() {
   const [collapseSignal, setCollapseSignal] = useState<{ action: "collapse" | "expand"; token: number } | null>(null);
   const [pendingDeleteClipId, setPendingDeleteClipId] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
+  // Carousel is an experimental alternative to the List view (see ClipCarousel) --
+  // local-only, not persisted, resets to List on reload.
+  const [clipViewMode, setClipViewMode] = useState<"list" | "carousel">("list");
+  // Page-level split: everything setup-related (description/characters/base
+  // prompt/template settings) vs. just the clips themselves -- local-only,
+  // not persisted, resets to General on reload.
+  const [pageTab, setPageTab] = useState<"general" | "clips">("general");
 
   if (error) return <div className="mx-auto max-w-4xl px-4 py-6 text-danger">{error.message}</div>;
   if (!video) return <div className="mx-auto max-w-4xl px-4 py-6">Loading...</div>;
@@ -81,6 +89,13 @@ export default function VideoDetail() {
   // *output files* grow cumulatively, but the setting itself stays per-clip) — so the timeline total
   // is the sum across done clips, not the last clip's value alone.
   const doneFramesSoFar = sortedClips.filter((c) => c.status === "done").reduce((sum, c) => sum + c.video_length, 0);
+
+  // Progressive disclosure: each section only appears once the one before it
+  // is actually filled in, so a new project reads as a to-do list instead of
+  // a wall of unrelated widgets.
+  const charactersReady = sortedCharacters.length > 0;
+  const basePromptReady = charactersReady && BASE_PROMPT_FIELDS.every(([key]) => Boolean(basePrompt[key]?.trim()));
+  const templateSettingsReady = basePromptReady && Boolean(templateSettings.model_type) && Boolean(templateSettings.resolution);
 
   function saveDescription() {
     updateVideo.mutate({ description });
@@ -134,6 +149,23 @@ export default function VideoDetail() {
       </div>
       <h1 className="mb-4 mt-2 text-2xl font-bold">{video.title}</h1>
 
+      <div className="mb-4 flex overflow-hidden rounded-md border border-border">
+        <button
+          className={`flex-1 border-0 py-2 text-base font-semibold ${pageTab === "general" ? "bg-accent text-accent-text" : "bg-transparent"}`}
+          onClick={() => setPageTab("general")}
+        >
+          General
+        </button>
+        <button
+          className={`flex-1 border-0 py-2 text-base font-semibold ${pageTab === "clips" ? "bg-accent text-accent-text" : "bg-transparent"}`}
+          onClick={() => setPageTab("clips")}
+        >
+          Clips
+        </button>
+      </div>
+
+      {pageTab === "general" && (
+      <>
       <label className="mb-3 flex flex-col gap-1 text-sm">
         Description <span className="font-normal text-text-muted">(what this video is about, for anyone opening the project)</span>
         <textarea
@@ -145,7 +177,47 @@ export default function VideoDetail() {
         />
       </label>
 
-      <details className="mb-3 rounded-lg border border-border bg-bg-alt p-3.5">
+      <details open className="mb-3 rounded-lg border border-border bg-bg-alt p-3.5">
+        <summary className="cursor-pointer font-semibold text-text-h">Characters ({sortedCharacters.length})</summary>
+        <div className="mt-3 flex flex-col gap-1.5">
+          {sortedCharacters.map((character) => (
+            <Link
+              key={character.id}
+              to="/videos/$id/characters/$characterId"
+              params={{ id, characterId: character.id }}
+              className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-1.5 no-underline hover:border-accent"
+            >
+              {character.references[0] && <ReferenceThumb type={character.references[0].type} path={character.references[0].path} />}
+              <span>Subject {character.order + 1}: {character.name || "(unnamed)"}</span>
+              <span className="text-sm opacity-75">{character.references.length} ref{character.references.length === 1 ? "" : "s"}</span>
+            </Link>
+          ))}
+        </div>
+        <Link to="/videos/$id/characters" params={{ id }}><button className="mt-2">Manage characters</button></Link>
+
+        {sortedCharacters.length > 0 && (
+          <details className="mt-3 rounded border border-border bg-bg p-2.5">
+            <summary className="cursor-pointer text-sm font-semibold text-text-h">Composed prompt preview (auto-generated, sent as-is)</summary>
+            <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
+              <label className="flex flex-col gap-1 text-sm">
+                subject_definitions
+                <textarea rows={4} readOnly value={video.composed_subject_definitions} />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                retention_analysis
+                <textarea rows={4} readOnly value={video.composed_retention_analysis} />
+              </label>
+            </div>
+          </details>
+        )}
+      </details>
+
+      {!charactersReady && (
+        <p className="mb-3 text-sm text-text-muted">Add at least one character above to continue.</p>
+      )}
+
+      {charactersReady && (
+      <details open={!basePromptReady} className="mb-3 rounded-lg border border-border bg-bg-alt p-3.5">
         <summary className="cursor-pointer font-semibold text-text-h">Base prompt (shared across all clips)</summary>
         <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
           {BASE_PROMPT_FIELDS.map(([key, label]) => (
@@ -161,7 +233,13 @@ export default function VideoDetail() {
         </div>
         <button className="mt-2" onClick={saveBasePrompt}>Save base prompt</button>
       </details>
+      )}
 
+      {charactersReady && !basePromptReady && (
+        <p className="mb-3 text-sm text-text-muted">Fill in summary, soundscape, and music above to continue.</p>
+      )}
+
+      {basePromptReady && (
       <details className="mb-3 rounded-lg border border-border bg-bg-alt p-3.5">
         <summary className="cursor-pointer font-semibold text-text-h">Template settings (model, resolution, references)</summary>
         <p className="mt-2 text-sm opacity-75">
@@ -236,54 +314,63 @@ export default function VideoDetail() {
         )}
         <button className="mt-3" onClick={saveTemplateSettings}>Save template settings</button>
       </details>
+      )}
+      </>
+      )}
 
-      <details open className="mb-3 rounded-lg border border-border bg-bg-alt p-3.5">
-        <summary className="cursor-pointer font-semibold text-text-h">Characters ({sortedCharacters.length})</summary>
-        <div className="mt-3 flex flex-col gap-1.5">
-          {sortedCharacters.map((character) => (
-            <Link
-              key={character.id}
-              to="/videos/$id/characters/$characterId"
-              params={{ id, characterId: character.id }}
-              className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-1.5 no-underline hover:border-accent"
-            >
-              {character.references[0] && <ReferenceThumb type={character.references[0].type} path={character.references[0].path} />}
-              <span>Subject {character.order + 1}: {character.name || "(unnamed)"}</span>
-              <span className="text-sm opacity-75">{character.references.length} ref{character.references.length === 1 ? "" : "s"}</span>
-            </Link>
-          ))}
-        </div>
-        <Link to="/videos/$id/characters" params={{ id }}><button className="mt-2">Manage characters</button></Link>
+      {pageTab === "clips" && !templateSettingsReady && (
+        <p className="text-sm text-text-muted">
+          Finish setup in the General tab (characters, base prompt, template settings) before working on clips.
+        </p>
+      )}
 
-        {sortedCharacters.length > 0 && (
-          <details className="mt-3 rounded border border-border bg-bg p-2.5">
-            <summary className="cursor-pointer text-sm font-semibold text-text-h">Composed prompt preview (auto-generated, sent as-is)</summary>
-            <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
-              <label className="flex flex-col gap-1 text-sm">
-                subject_definitions
-                <textarea rows={4} readOnly value={video.composed_subject_definitions} />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                retention_analysis
-                <textarea rows={4} readOnly value={video.composed_retention_analysis} />
-              </label>
-            </div>
-          </details>
-        )}
-      </details>
-
+      {pageTab === "clips" && templateSettingsReady && (
+      <>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-xl font-bold">
           Clips ({sortedClips.length}
           {doneFramesSoFar > 0 && `, ${formatFrames(doneFramesSoFar)} generated so far`})
         </h2>
         <div className="flex gap-2">
-          <button onClick={() => setCollapseSignal({ action: "collapse", token: Date.now() })}>Collapse done clips</button>
-          <button onClick={() => setCollapseSignal({ action: "expand", token: Date.now() })}>Expand all</button>
+          <div className="flex overflow-hidden rounded-md border border-border">
+            <button
+              className={`flex border-0 items-center ${clipViewMode === "list" ? "bg-accent text-accent-text" : "bg-transparent"}`}
+              onClick={() => setClipViewMode("list")}
+              title="List view"
+            >
+              <ListIcon size={16} />
+            </button>
+            <button
+              className={`flex border-0 items-center ${clipViewMode === "carousel" ? "bg-accent text-accent-text" : "bg-transparent"}`}
+              onClick={() => setClipViewMode("carousel")}
+              title="Carousel view (experimental: one clip at a time, video preview up top)"
+            >
+              <GalleryHorizontal size={16} />
+            </button>
+          </div>
         </div>
       </div>
+      {clipViewMode === "carousel" ? (
+        <ClipCarousel
+          clips={sortedClips}
+          characters={video.characters}
+          modelTags={video.model_tags}
+          anyActive={anyActive}
+          analyzing={analyzeClip.isPending}
+          onUpdate={(clipId, body) => updateClip.mutate({ clipId, body })}
+          onGenerate={(clipId) => generateClip.mutate(clipId)}
+          onAnalyze={(clipId) => analyzeClip.mutate(clipId)}
+          onDelete={(clipId) => removeClip(clipId)}
+        />
+      ) : (
       <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={sortedClips.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+          <div className="mb-2 flex justify-end">
+            <ClipListMenu
+              onCollapse={() => setCollapseSignal({ action: "collapse", token: Date.now() })}
+              onExpand={() => setCollapseSignal({ action: "expand", token: Date.now() })}
+            />
+          </div>
           <div className="flex flex-col gap-2.5">
             {sortedClips.map((clip, i) => (
               <ClipRow
@@ -306,6 +393,7 @@ export default function VideoDetail() {
           </div>
         </SortableContext>
       </DndContext>
+      )}
 
       <div className="my-4 rounded-lg border border-dashed border-border p-3.5">
         <h3 className="mb-2 font-semibold text-text-h">Add clip</h3>
@@ -348,6 +436,8 @@ export default function VideoDetail() {
           <div className="mt-2 text-sm opacity-60">Full video will automatically update here as clips complete.</div>
         )}
       </div>
+      </>
+      )}
 
       <ConfirmDialog
         open={!!pendingDeleteClipId}
@@ -356,6 +446,53 @@ export default function VideoDetail() {
         onConfirm={confirmRemoveClip}
       />
       <PromptGuideDialog open={guideOpen} onOpenChange={setGuideOpen} />
+    </div>
+  );
+}
+
+// Compact "..." menu for the two collapse/expand-all actions -- same manual
+// popover pattern as PromptTagEditor's AvailableTagsButton (no new library,
+// click-outside via a document listener).
+function ClipListMenu({ onCollapse, onExpand }: { onCollapse: () => void; onExpand: () => void }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  return (
+    <div ref={containerRef} className="relative inline-block">
+      <button title="More clip-list actions" onClick={() => setOpen(!open)}>
+        <MoreHorizontal size={16} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded border border-border bg-bg-alt p-1 shadow-lg">
+          <button
+            className="block w-full border-0 bg-transparent px-2 py-1.5 text-left text-sm"
+            onClick={() => {
+              onCollapse();
+              setOpen(false);
+            }}
+          >
+            Collapse done clips
+          </button>
+          <button
+            className="block w-full border-0 bg-transparent px-2 py-1.5 text-left text-sm"
+            onClick={() => {
+              onExpand();
+              setOpen(false);
+            }}
+          >
+            Expand all
+          </button>
+        </div>
+      )}
     </div>
   );
 }

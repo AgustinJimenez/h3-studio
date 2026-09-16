@@ -48,6 +48,12 @@ export const ReferenceVideoSchema = z.object({
 });
 export type ReferenceVideo = z.infer<typeof ReferenceVideoSchema>;
 
+export const ModelTagSchema = z.object({
+  tag: z.string(),
+  description: z.string(),
+});
+export type ModelTag = z.infer<typeof ModelTagSchema>;
+
 export const CharacterSchema = z.object({
   id: z.string(),
   order: z.number(),
@@ -58,6 +64,7 @@ export const CharacterSchema = z.object({
   references: z.array(ReferenceSchema).default([]),
   reference_videos: z.array(ReferenceVideoSchema).default([]),
   active_reference_video_id: z.string().nullable().optional(),
+  model_tags: z.array(ModelTagSchema).optional().default([]),
 });
 export type Character = z.infer<typeof CharacterSchema>;
 
@@ -104,12 +111,6 @@ export const BasePromptSchema = z.object({
   non_diegetic_music: z.string().optional().default(""),
 });
 export type BasePrompt = z.infer<typeof BasePromptSchema>;
-
-export const ModelTagSchema = z.object({
-  tag: z.string(),
-  description: z.string(),
-});
-export type ModelTag = z.infer<typeof ModelTagSchema>;
 
 export const VideoSchema = z.object({
   id: z.string(),

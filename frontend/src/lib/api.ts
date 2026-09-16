@@ -18,7 +18,10 @@ import {
   type QaReport,
 } from "../schemas";
 
-const API_BASE = "http://127.0.0.1:8787";
+// Derived from wherever this page was loaded from, so the same build works
+// both on localhost and when opened from another device on the LAN (the
+// backend always listens on the same port, just reached via a different host).
+const API_BASE = `http://${window.location.hostname}:8787`;
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -88,6 +91,24 @@ export const api = {
 
   addReference: async (videoId: string, characterId: string, body: { type: string; path: string; note?: string }): Promise<Character> =>
     CharacterSchema.parse(await request(`/videos/${videoId}/characters/${characterId}/references`, { method: "POST", body: JSON.stringify(body) })),
+  uploadReference: async (videoId: string, characterId: string, type: string, file: File, note?: string): Promise<Character> => {
+    const form = new FormData();
+    form.append("type", type);
+    form.append("note", note ?? "");
+    form.append("file", file);
+    const res = await fetch(`${API_BASE}/videos/${videoId}/characters/${characterId}/references/upload`, { method: "POST", body: form });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const data = await res.json();
+        detail = data.detail ? JSON.stringify(data.detail) : detail;
+      } catch {
+        // ignore, keep statusText
+      }
+      throw new Error(`${res.status} ${detail}`);
+    }
+    return CharacterSchema.parse(await res.json());
+  },
   deleteReference: (videoId: string, characterId: string, referenceId: string) =>
     request(`/videos/${videoId}/characters/${characterId}/references/${referenceId}`, { method: "DELETE" }),
   upscaleReference: (videoId: string, characterId: string, referenceId: string) =>

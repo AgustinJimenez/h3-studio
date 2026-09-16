@@ -47,59 +47,67 @@
   }
 }
 
-body {
-  margin: 0;
-  color: var(--text);
-  background: var(--bg);
-}
+/* Element resets live in Tailwind's own "base" layer so a Tailwind utility
+   class (e.g. bg-accent on a <button>) still wins in the cascade -- an
+   unlayered rule here would otherwise always beat a layered utility class
+   regardless of specificity or source order (this bit us once already: the
+   List/Carousel view toggle's active-state bg-accent class was silently
+   losing to this button{} background until it moved into the layer). */
+@layer base {
+  body {
+    margin: 0;
+    color: var(--text);
+    background: var(--bg);
+  }
 
-h1, h2, h3 {
-  color: var(--text-h);
-}
+  h1, h2, h3 {
+    color: var(--text-h);
+  }
 
-a {
-  color: var(--accent);
-}
+  a {
+    color: var(--accent);
+  }
 
-button {
-  font: inherit;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--bg-alt);
-  color: var(--text-h);
-  border-radius: 6px;
-  padding: 6px 12px;
-}
+  button {
+    font: inherit;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--bg-alt);
+    color: var(--text-h);
+    border-radius: 6px;
+    padding: 6px 12px;
+  }
 
-button:hover:not(:disabled) {
-  border-color: var(--accent);
-}
+  button:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
 
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 
-button.danger {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
-}
+  button.danger {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+  }
 
-input, textarea, select {
-  font: inherit;
-  color: var(--text-h);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
-  width: 100%;
-}
+  input, textarea, select {
+    font: inherit;
+    color: var(--text-h);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    width: 100%;
+  }
 
-input[type="checkbox"] {
-  width: auto;
-  padding: 0;
-  flex-shrink: 0;
+  input[type="checkbox"] {
+    width: auto;
+    padding: 0;
+    flex-shrink: 0;
+  }
 }
 
 .status-spinner {

@@ -217,6 +217,15 @@ def update_reference_video(video_id: str, character_id: str, reference_video_id:
     mutate(apply)
 
 
+def update_clip_upscale(video_id: str, clip_id: str, **fields: Any) -> None:
+    def apply(data: dict[str, Any]) -> None:
+        video = find_video(data, video_id)
+        clip = find_clip(video, clip_id)
+        clip.setdefault("upscale", {}).update(fields)
+
+    mutate(apply)
+
+
 def update_reference_video_upscale(video_id: str, character_id: str, reference_video_id: str, **fields: Any) -> None:
     def apply(data: dict[str, Any]) -> None:
         video = find_video(data, video_id)
