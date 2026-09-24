@@ -38,7 +38,8 @@ export function useCharacter(videoId: string, characterId: string) {
       if (!c) return false;
       const active =
         c.reference_videos.some((rv) => ACTIVE_STATUSES.has(rv.status) || ACTIVE_STATUSES.has(rv.upscale?.status ?? "none")) ||
-        c.references.some((r) => ACTIVE_STATUSES.has(r.upscale?.status ?? "none"));
+        c.references.some((r) => ACTIVE_STATUSES.has(r.upscale?.status ?? "none")) ||
+        c.generated_images.some((i) => ACTIVE_STATUSES.has(i.status));
       return active ? 4000 : false;
     },
   });
@@ -365,4 +366,51 @@ export function useCaptureReferenceFrame(videoId: string, characterId: string) {
     },
     onError: (err: Error) => toast.error(err.message),
   });
+}
+
+export function useGenerateCharacterImages(videoId: string, characterId: string) {
+  const invalidate = useInvalidateCharacter(videoId, characterId);
+  return useMutation({
+    mutationFn: (body: { prompt: string; source_paths: string[]; seed: number; count: number; aspect: string }) =>
+      api.generateCharacterImages(videoId, characterId, body),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Character image generation queued");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+}
+
+export function useDeleteCharacterImage(videoId: string, characterId: string) {
+  const invalidate = useInvalidateCharacter(videoId, characterId);
+  return useMutation({
+    mutationFn: (imageId: string) => api.deleteCharacterImage(videoId, characterId, imageId),
+    onSuccess: () => invalidate(),
+    onError: (err: Error) => toast.error(err.message),
+  });
+}
+
+export function useCharacterImageAsReference(videoId: string, characterId: string) {
+  const invalidate = useInvalidateCharacter(videoId, characterId);
+  return useMutation({
+    mutationFn: ({ imageId, note }: { imageId: string; note: string }) => api.useCharacterImageAsReference(videoId, characterId, imageId, note),
+    onSuccess: (_data, { note }) => {
+      invalidate();
+      toast.success(note ? "Added as outfit reference" : "Added as identity reference");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+}
+
+export function useActiveJobs() {
+  return useQuery({
+    queryKey: ["activeJobs"],
+    queryFn: api.listActiveJobs,
+    refetchInterval: (query) => ((query.state.data?.length ?? 0) > 0 ? 3000 : 15000),
+  });
+}
+
+export function useCharacterImageProviders() {
+  // Refetched every 20s so starting/stopping ComfyUI shows up without a reload.
+  return useQuery({ queryKey: ["characterImageProviders"], queryFn: api.getCharacterImageProviders, refetchInterval: 20000 });
 }

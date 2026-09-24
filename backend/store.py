@@ -226,6 +226,19 @@ def update_clip_upscale(video_id: str, clip_id: str, **fields: Any) -> None:
     mutate(apply)
 
 
+def update_generated_image(video_id: str, character_id: str, image_id: str, **fields: Any) -> None:
+    def apply(data: dict[str, Any]) -> None:
+        video = find_video(data, video_id)
+        character = find_character(video, character_id)
+        for image in character.get("generated_images") or []:
+            if image["id"] == image_id:
+                image.update(fields)
+                return
+        raise NotFound(f"generated image {image_id} not found")
+
+    mutate(apply)
+
+
 def update_reference_video_upscale(video_id: str, character_id: str, reference_video_id: str, **fields: Any) -> None:
     def apply(data: dict[str, Any]) -> None:
         video = find_video(data, video_id)

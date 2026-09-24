@@ -15,6 +15,7 @@ import copy
 import json
 import mimetypes
 import os
+import random
 import re
 import subprocess
 import sys
@@ -42,7 +43,7 @@ if str(WANGP_ROOT) not in sys.path:
 STAGING_DIR = Path(__file__).resolve().parent / "outputs"
 STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
-from . import animate, jobs, options, prompt, qa, store  # noqa: E402
+from . import animate, comfy, jobs, options, prompt, qa, store  # noqa: E402
 
 MEDIA_ROOT = store.VIDEOS_ROOT
 
@@ -77,10 +78,12 @@ def _startup() -> None:
     store.migrate_reference_video_shape()
     _session = init(root=WANGP_ROOT, output_dir=STAGING_DIR, console_output=True)
     _job_store = jobs.JobStore(_session)
+    comfy.manager.adopt()  # re-own a ComfyUI auto-started before a restart
 
 
 @app.on_event("shutdown")
 def _shutdown() -> None:
+    comfy.manager.stop()  # only stops a ComfyUI this backend auto-started
     if _session is not None:
         _session.close()
 
@@ -148,9 +151,15 @@ def reference_view(ref: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def generated_image_view(image: dict[str, Any]) -> dict[str, Any]:
+    return {**image, "output_url": to_output_url(image.get("output_path"))}
+
+
 def character_view(character: dict[str, Any]) -> dict[str, Any]:
     return {
         **character,
+        "image_gen": {**prompt.DEFAULT_CHARACTER["image_gen"], **(character.get("image_gen") or {})},
+        "generated_images": [generated_image_view(i) for i in character.get("generated_images") or []],
         "references": [reference_view(r) for r in character.get("references") or []],
         "reference_videos": [reference_video_view(rv) for rv in character.get("reference_videos") or []],
         # Same numbering build_reference_video_settings actually uses (a
@@ -288,6 +297,26 @@ class CharacterUpdate(BaseModel):
     # id of a reference_videos[] entry to substitute for this character's raw
     # references in future generations, or "" to clear it back to raw refs.
     active_reference_video_id: Optional[str] = None
+    # Character image generator settings: {"lora", "lora_multiplier", "trigger"}
+    # (merged into the stored dict, so a partial update keeps the other keys).
+    image_gen: Optional[dict[str, Any]] = None
+
+
+class CharacterImageCreate(BaseModel):
+    prompt: str = ""
+    # Images to edit from (Qwen 2.1 reference images, in prompt order as
+    # <image1>, <image2>...). Empty = plain text-to-image.
+    source_paths: list[str] = []
+    seed: int = -1  # -1 = random; with count > 1, entry i uses seed + i
+    count: int = 1
+    aspect: str = "square"  # key of prompt.CHARACTER_IMAGE_ASPECTS
+
+
+class UseAsReferenceBody(BaseModel):
+    # "" = identity reference (feeds the face). Anything else keeps the image
+    # out of the identity clause: compose_subject_definitions renders it as
+    # "...whose <note> comes from <Picture N>" (e.g. "wardrobe and outfit").
+    note: str = ""
 
 
 class ReferenceCreate(BaseModel):
@@ -509,6 +538,8 @@ def update_character(video_id: str, character_id: str, body: CharacterUpdate):
             character["retention"] = body.retention
         if body.active_reference_video_id is not None:
             character["active_reference_video_id"] = body.active_reference_video_id or None
+        if body.image_gen is not None:
+            character["image_gen"] = {**prompt.DEFAULT_CHARACTER["image_gen"], **(character.get("image_gen") or {}), **body.image_gen}
         return character
 
     try:
@@ -707,6 +738,160 @@ def capture_reference_frame(character_id: str, reference_video_id: str, body: Ca
         return c
 
     character = store.mutate(apply)
+    return character_view(character)
+
+
+# ------------------------------------------- character image generator -
+# Qwen-Image 2.1 stills (text-to-image, or edits of existing images) with the
+# character's own LoRA/trigger word; any result can be promoted into the
+# character's references[] so H3 clips pick it up like any other image ref.
+
+@app.get("/character-images/options")
+def character_image_options():
+    """Providers for the character image generator, with their LoRA lists."""
+    wangp_loras: list[str] = []
+    if _session is not None:
+        try:
+            wangp_loras = list(_session.list_loras(prompt.CHARACTER_IMAGE_MODEL_TYPE).get("loras") or [])
+        except Exception:
+            wangp_loras = []
+    return {"providers": [
+        {"id": "comfyui", "name": "ComfyUI (Qwen 2.1 GGUF)", "available": comfy.is_available() or comfy.can_autostart(),
+         "loras": comfy.list_loras(),
+         "note": "" if comfy.is_available() else (
+             f"Not running -- starts automatically on the first job (~30s extra), stops after {int(comfy.IDLE_SHUTDOWN_S // 60)} idle minutes."
+             if comfy.can_autostart() else f"Not running at {comfy.COMFY_URL} and no portable install found to start it.")},
+        {"id": "wangp", "name": "WanGP (Qwen 2.1 native)", "available": _session is not None, "loras": wangp_loras,
+         "note": "Edits currently come out broken and it's 2-4x slower (A/B 2026-09-23)."},
+    ]}
+
+
+@app.post("/videos/{video_id}/characters/{character_id}/generated-images")
+def generate_character_images(video_id: str, character_id: str, body: CharacterImageCreate):
+    if _job_store is None:
+        raise HTTPException(503, "server still starting up")
+    if not body.prompt.strip():
+        raise HTTPException(400, "a prompt is required")
+    if body.aspect not in prompt.CHARACTER_IMAGE_ASPECTS:
+        raise HTTPException(400, f"unknown aspect {body.aspect!r}")
+    for path in body.source_paths:
+        if not Path(path).is_file():
+            raise HTTPException(400, f"source image not found: {path}")
+    count = max(1, min(int(body.count), 4))
+    base_seed = body.seed if body.seed >= 0 else random.randint(0, 2**31 - 1 - count)
+
+    def apply(data):
+        video = store.find_video(data, video_id)
+        character = store.find_character(video, character_id)
+        created = []
+        for i in range(count):
+            image = {
+                "id": store.new_id(),
+                "prompt": body.prompt,
+                "source_paths": list(body.source_paths),
+                "seed": base_seed + i,
+                "aspect": body.aspect,
+                "status": "none",
+                "job_id": None,
+                "output_path": None,
+                "error": None,
+            }
+            character.setdefault("generated_images", []).append(image)
+            created.append(image)
+        return copy.deepcopy(video), copy.deepcopy(character), created
+
+    try:
+        video, character, created = store.mutate(apply)
+    except store.NotFound:
+        raise HTTPException(404, "video or character not found")
+
+    provider = (character.get("image_gen") or {}).get("provider") or prompt.DEFAULT_CHARACTER["image_gen"]["provider"]
+    for image in created:
+        if provider == "comfyui":
+            settings = prompt.build_character_image_comfy_params(video, character, image)
+        else:
+            settings = prompt.build_character_image_settings(video, character, image)
+        try:
+            settings["prompt"] = prompt.expand_prompt_tags(settings["prompt"], _prompt_tags_by_key())
+        except prompt.UnknownPromptTags as exc:
+            raise HTTPException(400, str(exc))
+        # No suffix: jobs.py keeps whatever image format WanGP wrote.
+        dest_path = store.characters_dir(video["folder"]) / f"{character_id}_img_{image['id']}"
+        image_id = image["id"]
+
+        def mark_queued(job_id: str, image_id=image_id, settings=settings) -> None:
+            store.update_generated_image(video_id, character_id, image_id, status="queued", job_id=job_id, error=None, last_generation_settings=settings)
+
+        def mark_running(image_id=image_id) -> None:
+            store.update_generated_image(video_id, character_id, image_id, status="running")
+
+        def on_done(status: str, output_path: str | None, error: str | None, duration_seconds: float | None = None, image_id=image_id) -> None:
+            store.update_generated_image(video_id, character_id, image_id, status=status, output_path=output_path, error=error, generation_duration_seconds=duration_seconds)
+
+        if provider == "comfyui":
+            runner = comfy.make_runner(settings, release_wangp=_session.release_model)
+            _job_store.submit_callable(runner, dest_path, on_done, on_queued=mark_queued, on_running=mark_running)
+        else:
+            _job_store.submit(settings, dest_path, on_done, on_queued=mark_queued, on_running=mark_running)
+
+    data = store.load()
+    return character_view(store.find_character(store.find_video(data, video_id), character_id))
+
+
+@app.delete("/videos/{video_id}/characters/{character_id}/generated-images/{image_id}")
+def delete_character_image(video_id: str, character_id: str, image_id: str):
+    def apply(data):
+        video = store.find_video(data, video_id)
+        character = store.find_character(video, character_id)
+        images = character.get("generated_images") or []
+        image = next((i for i in images if i["id"] == image_id), None)
+        if image is None:
+            raise store.NotFound(image_id)
+        character["generated_images"] = [i for i in images if i["id"] != image_id]
+        # Keep the file if it was promoted to a reference — that reference points at it.
+        in_use = any(r.get("path") == image.get("output_path") for r in character.get("references") or [])
+        return image.get("output_path") if not in_use else None
+
+    try:
+        orphan_path = store.mutate(apply)
+    except store.NotFound:
+        raise HTTPException(404, "video, character, or generated image not found")
+    if orphan_path:
+        Path(orphan_path).unlink(missing_ok=True)
+    return {"ok": True}
+
+
+@app.post("/videos/{video_id}/characters/{character_id}/generated-images/{image_id}/use-as-reference")
+def use_character_image_as_reference(video_id: str, character_id: str, image_id: str, body: Optional[UseAsReferenceBody] = None):
+    """Promote a generated image into references[]. Generated faces are Qwen's
+    interpretation of the person, and H3 favours the cleanest frontal face it
+    gets (a Qwen headshot overrode the real photo in a 2026-09-23 A/B), so the
+    usual use is as an outfit reference (note) rather than an identity one.
+    Calling it again for the same image switches its role instead of duplicating."""
+    note = (body.note if body else "").strip()
+
+    def apply(data):
+        video = store.find_video(data, video_id)
+        character = store.find_character(video, character_id)
+        image = next((i for i in character.get("generated_images") or [] if i["id"] == image_id), None)
+        if image is None:
+            raise store.NotFound(image_id)
+        if image.get("status") != "done" or not image.get("output_path"):
+            raise ValueError("image has not finished generating")
+        refs = character.setdefault("references", [])
+        existing = next((r for r in refs if r.get("path") == image["output_path"]), None)
+        if existing is not None:
+            existing["note"] = note
+        else:
+            refs.append({"id": store.new_id(), "type": "image", "path": image["output_path"], "note": note})
+        return character
+
+    try:
+        character = store.mutate(apply)
+    except store.NotFound:
+        raise HTTPException(404, "video, character, or generated image not found")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     return character_view(character)
 
 
@@ -1278,6 +1463,55 @@ def unload_model():
 
 class LoadModelRequest(BaseModel):
     model_type: str
+
+
+def _job_targets() -> dict[str, dict[str, Any]]:
+    """job_id -> what that job is for and where it lives in the UI. Built from
+    the stored statuses; /jobs/active only keeps ids the JobStore says are live."""
+    targets: dict[str, dict[str, Any]] = {}
+
+    def add(job_id: str | None, **info: Any) -> None:
+        if job_id:
+            targets[job_id] = info
+
+    for video in store.load()["videos"]:
+        base = {"video_id": video["id"], "video_title": video.get("title") or ""}
+        for clip in video.get("clips") or []:
+            add(clip.get("job_id"), **base, kind="clip", label=f"Clip #{clip['order']}", target_id=clip["id"], character_id=None, character_name=None)
+            add((clip.get("upscale") or {}).get("job_id"), **base, kind="clip_upscale", label=f"Clip #{clip['order']} upscale", target_id=clip["id"], character_id=None, character_name=None)
+        for character in video.get("characters") or []:
+            cbase = {**base, "character_id": character["id"], "character_name": character.get("name") or ""}
+            for rv in character.get("reference_videos") or []:
+                name = rv.get("name") or "Reference video"
+                add(rv.get("job_id"), **cbase, kind="reference_video", label=name, target_id=rv["id"])
+                add((rv.get("upscale") or {}).get("job_id"), **cbase, kind="reference_video_upscale", label=f"{name} upscale", target_id=rv["id"])
+            for ref in character.get("references") or []:
+                add((ref.get("upscale") or {}).get("job_id"), **cbase, kind="reference_upscale", label=f"Upscale {Path(ref['path']).name}", target_id=ref["id"])
+            for image in character.get("generated_images") or []:
+                add(image.get("job_id"), **cbase, kind="character_image", label=f"Character image (seed {image.get('seed')})", target_id=image["id"])
+    for job in store.load_animate_jobs():
+        add(job.get("job_id"), kind="animate", label=job.get("label") or "Animate job", target_id=job["id"],
+            video_id=None, video_title=None, character_id=None, character_name=None)
+    return targets
+
+
+@app.get("/jobs/active")
+def list_active_jobs():
+    """The real generation queue (running job first, then queued ones in
+    order), each resolved to the item it belongs to — feeds the floating
+    queue indicator."""
+    if _job_store is None:
+        return []
+    live = _job_store.snapshot()
+    if not live:
+        return []
+    targets = _job_targets()
+    out = []
+    for position, entry in enumerate(live):
+        info = targets.get(entry["job_id"]) or {"kind": "unknown", "label": "Job", "target_id": None,
+                                                  "video_id": None, "video_title": None, "character_id": None, "character_name": None}
+        out.append({**entry, **info, "position": position})
+    return out
 
 
 @app.get("/model-status")

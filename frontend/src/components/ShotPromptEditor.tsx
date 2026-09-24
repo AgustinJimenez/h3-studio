@@ -35,7 +35,7 @@ export default function ShotPromptEditor({
   onBlur?: () => void;
 }) {
   const { data: promptTags } = usePromptTags();
-  const [tab, setTab] = useState<"simple" | "structured">("simple");
+  const [tab, setTab] = useState<"simple" | "structured">("structured");
   const [text, setText] = useState(initialValue);
 
   function handleChange(next: string) {

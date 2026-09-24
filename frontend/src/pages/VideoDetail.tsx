@@ -25,7 +25,9 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import PromptGuideDialog from "../components/PromptGuideDialog";
 import ShotPromptEditor from "../components/ShotPromptEditor";
 import ClipCarousel from "../components/ClipCarousel";
+import VideoPlayer from "../components/VideoPlayer";
 import type { Clip, BasePrompt, ModelTag, QaReport, Character } from "../schemas";
+import { jobTargetDomId, useFocusTarget } from "../lib/jobFocus";
 
 const ACTIVE_STATUSES = new Set(["queued", "running"]);
 const FPS = 24; // H3's frame rate — see prompt.py's DEFAULT_VIDEO_LENGTH comment.
@@ -68,11 +70,30 @@ export default function VideoDetail() {
   const [guideOpen, setGuideOpen] = useState(false);
   // Carousel is an experimental alternative to the List view (see ClipCarousel) --
   // local-only, not persisted, resets to List on reload.
-  const [clipViewMode, setClipViewMode] = useState<"list" | "carousel">("list");
+  const [clipViewMode, setClipViewMode] = useState<"list" | "carousel">("carousel");
   // Page-level split: everything setup-related (description/characters/base
   // prompt/template settings) vs. just the clips themselves -- local-only,
   // not persisted, resets to General on reload.
   const [pageTab, setPageTab] = useState<"general" | "clips">("general");
+  // Once clips already exist, the project is past setup and clips are what
+  // you came back to look at -- default straight there instead of making
+  // every reload land back on General. A ref guards this to a single
+  // decision per video, so switching to General yourself afterward (e.g. to
+  // tweak a character) doesn't get silently reverted by a refetch -- but it
+  // must be keyed to the video id, not just "has this ever fired": TanStack
+  // Router reuses this same component instance across /videos/$id
+  // navigations (no remount), so without the id check, deciding once for
+  // video A would permanently block the decision from ever running for
+  // video B.
+  const didSetInitialTab = useRef<string | null>(null);
+  useEffect(() => {
+    if (video && didSetInitialTab.current !== video.id) {
+      didSetInitialTab.current = video.id;
+      setPageTab(video.clips.some((c) => c.status === "done") ? "clips" : "general");
+    }
+  }, [video]);
+  // Queue indicator "go to this clip": clips only render on the Clips tab.
+  useFocusTarget(video?.clips.map((c) => c.id) ?? [], () => setPageTab("clips"));
 
   if (error) return <div className="mx-auto max-w-4xl px-4 py-6 text-danger">{error.message}</div>;
   if (!video) return <div className="mx-auto max-w-4xl px-4 py-6">Loading...</div>;
@@ -312,6 +333,57 @@ export default function VideoDetail() {
             </label>
           </div>
         )}
+        {options && options.loras.length > 0 && (
+          <div className="mt-3 flex flex-col gap-1 text-sm">
+            <span>LoRAs</span>
+            <div className="flex flex-col gap-1 rounded border border-border p-2">
+              {options.loras.map((lora) => {
+                const activated = (templateSettings.activated_loras as string[]) ?? [];
+                const multipliers = ((templateSettings.loras_multipliers as string) ?? "").split(/\s+/).filter(Boolean);
+                const idx = activated.indexOf(lora);
+                const checked = idx !== -1;
+                return (
+                  <label key={lora} className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        const nextActivated = [...activated];
+                        const nextMultipliers = [...multipliers];
+                        if (e.target.checked) {
+                          nextActivated.push(lora);
+                          nextMultipliers.push("1");
+                        } else {
+                          nextActivated.splice(idx, 1);
+                          nextMultipliers.splice(idx, 1);
+                        }
+                        setTemplateDraft({
+                          ...templateSettings,
+                          activated_loras: nextActivated,
+                          loras_multipliers: nextMultipliers.join(" "),
+                        });
+                      }}
+                    />
+                    <span className="flex-1 truncate" title={lora}>{lora}</span>
+                    {checked && (
+                      <input
+                        type="number"
+                        step="0.05"
+                        className="w-20"
+                        value={multipliers[idx] ?? "1"}
+                        onChange={(e) => {
+                          const nextMultipliers = [...multipliers];
+                          nextMultipliers[idx] = e.target.value;
+                          setTemplateDraft({ ...templateSettings, loras_multipliers: nextMultipliers.join(" ") });
+                        }}
+                      />
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <button className="mt-3" onClick={saveTemplateSettings}>Save template settings</button>
       </details>
       )}
@@ -425,12 +497,10 @@ export default function VideoDetail() {
           <button disabled={!anyDone} onClick={() => concatVideo.mutate()}>Re-join clips</button>
         </div>
         {video.concat_output_url ? (
-          <video
+          <VideoPlayer
             key={video.concat_output_url}
-            controls
-            width={480}
-            className="mt-2 max-w-full rounded"
-            src={mediaUrl(video.concat_output_url) ?? undefined}
+            className="mt-2 max-w-[480px] rounded"
+            src={mediaUrl(video.concat_output_url)}
           />
         ) : (
           <div className="mt-2 text-sm opacity-60">Full video will automatically update here as clips complete.</div>
@@ -546,6 +616,7 @@ function ClipRow({
   return (
     <div
       ref={setNodeRef}
+      id={jobTargetDomId(clip.id)}
       style={style}
       className={`flex gap-3 rounded-lg border border-border border-l-4 p-2.5 ${isDragging ? "opacity-50" : ""}`}
       data-status={clip.status}
@@ -668,7 +739,7 @@ function ClipRow({
           {clip.error && <div className="whitespace-pre-wrap rounded border border-danger bg-red-950/30 px-3 py-2 text-danger">{clip.error}</div>}
           {previewUrl && (
             <div className="flex flex-col items-start gap-1">
-              <video controls width={320} className="max-w-full rounded" src={mediaUrl(previewUrl) ?? undefined} />
+              <VideoPlayer className="max-w-[320px] rounded" src={mediaUrl(previewUrl)} />
               {hasOwnSegment && (
                 <button onClick={() => setPreviewFull(!previewFull)}>
                   {previewFull ? "Show this clip's own segment only" : "Show full chain up to this clip"}

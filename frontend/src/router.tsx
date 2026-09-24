@@ -1,5 +1,6 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
 import TopNav from "./components/TopNav";
+import QueueIndicator from "./components/QueueIndicator";
 import VideosList from "./pages/VideosList";
 import VideoDetail from "./pages/VideoDetail";
 import CharactersList from "./pages/CharactersList";
@@ -12,6 +13,7 @@ const rootRoute = createRootRoute({
     <>
       <TopNav />
       <Outlet />
+      <QueueIndicator />
     </>
   ),
 });

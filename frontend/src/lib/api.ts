@@ -5,6 +5,8 @@ import {
   ClipSchema,
   OptionsSchema,
   ModelStatusSchema,
+  ActiveJobSchema,
+  ImageProviderSchema,
   PromptTagSchema,
   AnimateJobSchema,
   type Video,
@@ -13,6 +15,8 @@ import {
   type Clip,
   type Options,
   type ModelStatus,
+  type ActiveJob,
+  type ImageProvider,
   type PromptTag,
   type AnimateJob,
   type QaReport,
@@ -75,6 +79,9 @@ export const api = {
   generateClip: (clipId: string) => request<{ job_id: string; status: string }>(`/clips/${clipId}/generate`, { method: "POST" }),
   analyzeClip: (clipId: string): Promise<QaReport> => request(`/clips/${clipId}/analyze`, { method: "POST" }),
   unloadModel: () => request<{ ok: boolean }>("/unload-model", { method: "POST" }),
+  getCharacterImageProviders: async (): Promise<ImageProvider[]> =>
+    ImageProviderSchema.array().parse(((await request("/character-images/options")) as { providers: unknown }).providers),
+  listActiveJobs: async (): Promise<ActiveJob[]> => ActiveJobSchema.array().parse(await request("/jobs/active")),
   getModelStatus: async (): Promise<ModelStatus> => ModelStatusSchema.parse(await request("/model-status")),
   loadModel: (modelType: string) =>
     request<{ ok: boolean; model_type: string }>("/load-model", { method: "POST", body: JSON.stringify({ model_type: modelType }) }),
@@ -126,6 +133,19 @@ export const api = {
     request<{ job_id: string; status: string }>(`/characters/${characterId}/reference-videos/${referenceVideoId}/upscale`, { method: "POST" }),
   captureReferenceFrame: async (characterId: string, referenceVideoId: string, body: { timestamp: number; source?: string; note?: string }): Promise<Character> =>
     CharacterSchema.parse(await request(`/characters/${characterId}/reference-videos/${referenceVideoId}/capture-frame`, { method: "POST", body: JSON.stringify(body) })),
+
+  generateCharacterImages: async (
+    videoId: string,
+    characterId: string,
+    body: { prompt: string; source_paths: string[]; seed: number; count: number; aspect: string }
+  ): Promise<Character> =>
+    CharacterSchema.parse(await request(`/videos/${videoId}/characters/${characterId}/generated-images`, { method: "POST", body: JSON.stringify(body) })),
+  deleteCharacterImage: (videoId: string, characterId: string, imageId: string) =>
+    request(`/videos/${videoId}/characters/${characterId}/generated-images/${imageId}`, { method: "DELETE" }),
+  useCharacterImageAsReference: async (videoId: string, characterId: string, imageId: string, note = ""): Promise<Character> =>
+    CharacterSchema.parse(
+      await request(`/videos/${videoId}/characters/${characterId}/generated-images/${imageId}/use-as-reference`, { method: "POST", body: JSON.stringify({ note }) })
+    ),
 
   listPromptTags: async (): Promise<PromptTag[]> => PromptTagSchema.array().parse(await request("/prompt-tags")),
   createPromptTag: async (body: { name: string; key: string; body: string }): Promise<PromptTag> =>

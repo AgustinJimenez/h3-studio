@@ -74,6 +74,8 @@ DEFAULT_TEMPLATE_SETTINGS = {
     "sliding_window_trim_first_frames": 0,
     "image_refs_relative_size": 100,
     "remove_background_images_ref": 1,
+    "activated_loras": [],
+    "loras_multipliers": "",
 }
 
 DEFAULT_VIDEO_LENGTH = 362  # ~15s @ 24fps, the single-sliding-window ceiling
@@ -106,7 +108,20 @@ DEFAULT_CHARACTER = {
     # generations — at most one at a time, replaces the old boolean
     # use_reference_video (which only made sense with a single video).
     "active_reference_video_id": None,
+    # Character image generator (Qwen-Image 2.1 + an optional character LoRA):
+    # stills generated from text or by editing existing images, any of which
+    # can then be promoted into references[] via "use as reference".
+    # provider: "comfyui" (default — WanGP's native Qwen 2.1 edits came out
+    # broken in an A/B, see comfy.py) or "wangp".
+    "image_gen": {"provider": "comfyui", "lora": "", "lora_multiplier": 1.0, "trigger": ""},
+    "generated_images": [],
 }
+
+# Qwen-Image 2.1 through WanGP's own native integration (models/qwen21) —
+# the same JobStore/session as H3, so switching models is just a model reload.
+CHARACTER_IMAGE_MODEL_TYPE = "qwen_image_21_7B"
+CHARACTER_IMAGE_MODEL_FILENAME = "https://huggingface.co/DeepBeepMeep/Qwen_image_2/resolve/main/qwen_image_21_7B_int8_convrot.safetensors"
+CHARACTER_IMAGE_ASPECTS = {"square": "1024x1024", "portrait": "896x1152", "landscape": "1152x896"}
 
 # Template for one entry appended to a character's reference_videos[] list.
 # Four separate inputs, joined into one detailed_description at generation
@@ -311,7 +326,10 @@ def compose_subject_definitions(characters: list[dict[str, Any]]) -> str:
     for index, character in enumerate(characters):
         subject_n = index + 1
         name = character.get("name") or f"Character {subject_n}"
-        identity = (character.get("identity_description") or "").strip()
+        # Trailing period stripped: the identity text is spliced mid-sentence
+        # (", preserving <identity>, and whose ... comes from ..."), so a
+        # description ending in "." used to produce "build.." / "build., and".
+        identity = (character.get("identity_description") or "").strip().rstrip(".").rstrip()
         wardrobe = (character.get("wardrobe_notes") or "").strip()
 
         labeled, img_i, vid_i, aud_i = _labeled_references(character, img_i, vid_i, aud_i)
@@ -546,3 +564,59 @@ def build_reference_video_settings(video: dict[str, Any], character: dict[str, A
     video_length = int(reference_video.get("video_length") or DEFAULT_VIDEO_LENGTH)
     output_filename = f"{video['id']}_char_{character['id']}_ref_{reference_video['id']}"
     return _finalize_settings(template, solo, prompt, reference_video.get("seed", -1), video_length, output_filename)
+
+
+def _character_image_prompt(character: dict[str, Any], image: dict[str, Any]) -> str:
+    trigger = ((character.get("image_gen") or {}).get("trigger") or "").strip()
+    text = (image.get("prompt") or "").strip()
+    return f"{trigger}, {text}" if trigger and text else (trigger or text)
+
+
+def build_character_image_comfy_params(video: dict[str, Any], character: dict[str, Any], image: dict[str, Any]) -> dict[str, Any]:
+    """Provider-neutral parameters for comfy.build_graph (also stored as the
+    image's last_generation_settings). In edit mode the output size follows
+    the first source image, so width/height only apply to text-to-image."""
+    image_gen = character.get("image_gen") or {}
+    width, height = (int(v) for v in CHARACTER_IMAGE_ASPECTS.get(image.get("aspect") or "square", CHARACTER_IMAGE_ASPECTS["square"]).split("x"))
+    return {
+        "provider": "comfyui",
+        "prompt": _character_image_prompt(character, image),
+        "seed": int(image.get("seed", 0)),
+        "width": width,
+        "height": height,
+        "source_paths": [p for p in (image.get("source_paths") or []) if p][:10],
+        "lora": (image_gen.get("lora") or "").strip(),
+        "lora_multiplier": float(image_gen.get("lora_multiplier", 1.0)),
+        "output_prefix": f"h3studio/{video['id']}_char_{character['id']}_img_{image['id']}",
+    }
+
+
+def build_character_image_settings(video: dict[str, Any], character: dict[str, Any], image: dict[str, Any]) -> dict[str, Any]:
+    """Settings for one still from a character's image generator: Qwen-Image
+    2.1 text-to-image, or an edit when the entry has source_paths (Qwen 2.1
+    takes up to 10 ordered reference images, activated by "I" in
+    video_prompt_type — models/qwen21/qwen21_handler.py's image_ref_choices).
+    The character's trigger word is prepended so prompts can stay short."""
+    image_gen = character.get("image_gen") or {}
+    prompt = _character_image_prompt(character, image)
+    lora = (image_gen.get("lora") or "").strip()
+    sources = [p for p in (image.get("source_paths") or []) if p][:10]
+    return {
+        "model_type": CHARACTER_IMAGE_MODEL_TYPE,
+        "model_filename": CHARACTER_IMAGE_MODEL_FILENAME,
+        "image_mode": 1,
+        "prompt": prompt,
+        "negative_prompt": " ",
+        "seed": int(image.get("seed", -1)),
+        "resolution": CHARACTER_IMAGE_ASPECTS.get(image.get("aspect") or "square", CHARACTER_IMAGE_ASPECTS["square"]),
+        "num_inference_steps": 40,
+        "guidance_scale": 4.0,
+        "batch_size": 1,
+        "repeat_generation": 1,
+        "video_prompt_type": "I" if sources else "",
+        "image_refs": sources,
+        "remove_background_images_ref": 0,
+        "activated_loras": [lora] if lora else [],
+        "loras_multipliers": f"{float(image_gen.get('lora_multiplier', 1.0)):g}" if lora else "",
+        "output_filename": f"{video['id']}_char_{character['id']}_img_{image['id']}",
+    }

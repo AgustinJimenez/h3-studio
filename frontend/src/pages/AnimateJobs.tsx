@@ -12,7 +12,9 @@ import { mediaUrl } from "../lib/api";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ReferenceThumb from "../components/ReferenceThumb";
 import StatusBadge from "../components/StatusBadge";
+import VideoPlayer from "../components/VideoPlayer";
 import type { AnimateJob } from "../schemas";
+import { jobTargetDomId } from "../lib/jobFocus";
 
 const RESOLUTIONS = ["832x480", "480x832", "1280x720", "720x1280"];
 
@@ -225,7 +227,7 @@ function AnimateJobRow({ job, onDelete }: { job: AnimateJob; onDelete: () => voi
   }
 
   return (
-    <div className="rounded-lg border border-border bg-bg-alt p-3.5">
+    <div id={jobTargetDomId(job.id)} className="rounded-lg border border-border bg-bg-alt p-3.5">
       <div className="mb-2 flex flex-wrap items-center gap-3">
         <StatusBadge status={job.status} />
         <span className="font-semibold text-text-h">{job.label || "(untitled job)"}</span>
@@ -246,7 +248,7 @@ function AnimateJobRow({ job, onDelete }: { job: AnimateJob; onDelete: () => voi
       <AnimateJobFields draft={draft} setDraft={setDraft} />
 
       {job.status === "done" && job.output_url && (
-        <video className="mt-3 max-w-full rounded border border-border" src={mediaUrl(job.output_url) ?? undefined} controls />
+        <VideoPlayer className="mt-3 max-w-full rounded border border-border" src={mediaUrl(job.output_url)} />
       )}
     </div>
   );

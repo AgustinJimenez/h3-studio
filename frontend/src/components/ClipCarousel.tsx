@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { mediaUrl } from "../lib/api";
 import { wordCount, wordCountClass, WORD_TARGET_MIN, WORD_TARGET_MAX } from "../lib/wordCount";
 import StatusBadge from "./StatusBadge";
 import GenerationParams from "./GenerationParams";
 import ShotPromptEditor from "./ShotPromptEditor";
+import VideoPlayer from "./VideoPlayer";
 import type { Clip, ModelTag, Character } from "../schemas";
+import { jobTargetDomId, useFocusTarget } from "../lib/jobFocus";
 
 // Solid fill + white text, same treatment as StatusBadge elsewhere in the
 // app -- a dark outline-only ring read as murky/low-contrast on the dark
@@ -37,7 +39,7 @@ type ClipFieldsHandlers = {
 // view's ClipRow has. Self-contained (owns its own previewFull state) so it
 // can be reused unmodified for both the current clip and every peeking
 // neighbor in the row.
-function ClipVideoBlock({ clip }: { clip: Clip }) {
+function ClipVideoBlock({ clip, selected = true }: { clip: Clip; selected?: boolean }) {
   const [previewFull, setPreviewFull] = useState(false);
   const hasOwnSegment = !!clip.own_segment_url && clip.own_segment_url !== clip.output_url;
   const previewUrl = previewFull || !hasOwnSegment ? clip.output_url : clip.own_segment_url;
@@ -51,7 +53,7 @@ function ClipVideoBlock({ clip }: { clip: Clip }) {
   }
   return (
     <div className="flex flex-col items-center gap-1">
-      <video key={previewUrl} controls className="w-full max-w-full rounded" src={mediaUrl(previewUrl) ?? undefined} />
+      <VideoPlayer key={previewUrl} className="w-full max-w-full rounded" src={mediaUrl(previewUrl)} controls={selected} />
       {hasOwnSegment && (
         <button onClick={() => setPreviewFull(!previewFull)}>
           {previewFull ? "Show this clip's own segment only" : "Show full chain up to this clip"}
@@ -281,23 +283,36 @@ function MiniClipCard({
 } & ClipFieldsHandlers) {
   return (
     <div className="relative z-0 w-80 shrink-0 overflow-hidden rounded-lg border border-border bg-bg p-2 opacity-80 transition-opacity hover:opacity-100">
-      <button onClick={onJump} title={`Jump to clip #${clip.order}`} className="mb-2 flex w-full items-center justify-between gap-1 border-0 bg-transparent p-0">
-        <span className="text-xs font-semibold opacity-75">#{clip.order}</span>
-        <StatusBadge status={clip.status} />
-      </button>
-      <div style={{ width: 640, zoom: 0.5 }}>
-        <ClipVideoBlock clip={clip} />
-        <div className="mt-3">
-          <ClipFields
-            clip={clip}
-            characters={characters}
-            modelTags={modelTags}
-            isFirst={isFirst}
-            canBridge={canBridge}
-            anyActive={anyActive}
-            analyzing={analyzing}
-            {...handlers}
-          />
+      {/* A neighbor card is a preview, not a second editing surface -- none of
+          its video controls, inputs, checkboxes, or buttons should be
+          individually clickable. One invisible full-card button captures
+          every click and jumps to this clip; the real content underneath is
+          pointer-events-none so nothing inside it can intercept the click. */}
+      <button
+        onClick={onJump}
+        title={`Jump to clip #${clip.order}`}
+        aria-label={`Jump to clip #${clip.order}`}
+        className="absolute inset-0 z-10 cursor-pointer border-0 bg-transparent p-0"
+      />
+      <div className="pointer-events-none">
+        <div className="mb-2 flex w-full items-center justify-between gap-1">
+          <span className="text-xs font-semibold opacity-75">#{clip.order}</span>
+          <StatusBadge status={clip.status} />
+        </div>
+        <div style={{ width: 640, zoom: 0.5 }}>
+          <ClipVideoBlock clip={clip} selected={false} />
+          <div className="mt-3">
+            <ClipFields
+              clip={clip}
+              characters={characters}
+              modelTags={modelTags}
+              isFirst={isFirst}
+              canBridge={canBridge}
+              anyActive={anyActive}
+              analyzing={analyzing}
+              {...handlers}
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -328,13 +343,27 @@ export default function ClipCarousel({
   analyzing: boolean;
 } & ClipFieldsHandlers) {
   const firstNotDone = clips.findIndex((c) => c.status !== "done");
-  const [index, setIndex] = useState(firstNotDone >= 0 ? firstNotDone : 0);
+  const [index, setIndexRaw] = useState(firstNotDone >= 0 ? firstNotDone : 0);
+  // Which way the row should slide in from -- set right before the index
+  // change so the CSS animation (keyed on index below) picks the matching
+  // direction. A ref, not state: it only needs to be read during the same
+  // render that setIndex triggers, never causes its own render.
+  const direction = useRef<"left" | "right">("right");
+  function setIndex(next: number) {
+    direction.current = next < index ? "left" : "right";
+    setIndexRaw(next);
+  }
 
   // Clip list can shrink (delete) or the whole thing can be empty briefly --
   // keep the index in bounds rather than pointing past the end.
   useEffect(() => {
-    if (index >= clips.length) setIndex(Math.max(0, clips.length - 1));
+    if (index >= clips.length) setIndexRaw(Math.max(0, clips.length - 1));
   }, [clips.length, index]);
+
+  useFocusTarget(clips.map((c) => c.id), (id) => {
+    const i = clips.findIndex((c) => c.id === id);
+    if (i >= 0) setIndexRaw(i);
+  });
 
   const clip = clips[index];
   if (!clip) return <div className="py-6 text-sm opacity-60">No clips yet.</div>;
@@ -345,7 +374,14 @@ export default function ClipCarousel({
   const handlers: ClipFieldsHandlers = { onUpdate, onGenerate, onAnalyze, onDelete };
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-bg-alt p-3.5">
+    // Breaks out to full viewport width as ONE panel (not just the peek row
+    // below) -- the index strip/nav used to sit in the page's normal
+    // contained width while the row below spanned edge to edge, which read
+    // as two mismatched pieces rather than one carousel. The index strip and
+    // nav stay visually centered via their own inner max-width wrapper; only
+    // the peek row itself uses the full panel width.
+    <div id={jobTargetDomId(clip.id)} className="relative left-1/2 right-1/2 -mx-[50vw] flex w-screen flex-col gap-3 border-y border-border bg-bg-alt py-3.5">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 px-4">
       <div className="flex flex-wrap items-center justify-center gap-1.5">
         {clips.map((c, i) => (
           <button
@@ -380,17 +416,17 @@ export default function ClipCarousel({
           <ChevronRight size={20} />
         </button>
       </div>
+      </div>
 
-      {/* Breaks out of the page's centered max-width container to span the full
-          viewport, so neighboring clips can peek in on both sides of the
-          current one -- classic negative-margin breakout trick, scoped to just
-          this row (the rest of the page stays at the normal contained width).
-          Every card in the row (center included) shares the same fixed height
-          and scrolls independently -- without that, the center card's natural
-          content height and the sides' would mismatch and the taller ones
-          would visually spill past wherever the shorter one happened to end. */}
-      <div className="relative left-1/2 right-1/2 -mx-[50vw] w-screen">
-        <div className="hidden items-start justify-center gap-3 overflow-x-auto px-4 md:flex">
+      {/* Peek row spans the panel's full breakout width (the panel itself
+          already broke out above, so no second breakout needed here) so
+          neighboring clips can peek in on both sides of the current one. */}
+      <div
+        key={index}
+        className={`hidden items-start justify-center gap-3 overflow-x-auto px-4 md:flex ${
+          direction.current === "left" ? "carousel-slide-from-left" : "carousel-slide-from-right"
+        }`}
+      >
           {/* Near the start/end of the chain there are fewer than PEEK real
               neighbors on that side. Padding with same-width invisible spacers
               (instead of just rendering fewer cards) keeps the row's total
@@ -468,7 +504,6 @@ export default function ClipCarousel({
             {...handlers}
           />
         </div>
-      </div>
     </div>
   );
 }

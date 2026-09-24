@@ -54,6 +54,30 @@ export const ModelTagSchema = z.object({
 });
 export type ModelTag = z.infer<typeof ModelTagSchema>;
 
+export const CharacterImageGenSchema = z.object({
+  provider: z.enum(["comfyui", "wangp"]).catch("comfyui"),
+  lora: z.string().default(""),
+  lora_multiplier: z.number().default(1),
+  trigger: z.string().default(""),
+});
+export type CharacterImageGen = z.infer<typeof CharacterImageGenSchema>;
+
+export const GeneratedImageSchema = z.object({
+  id: z.string(),
+  prompt: z.string().default(""),
+  source_paths: z.array(z.string()).default([]),
+  seed: z.number().default(-1),
+  aspect: z.string().default("square"),
+  status: StatusSchema.catch("none"),
+  job_id: z.string().nullable().optional(),
+  output_path: z.string().nullable().optional(),
+  output_url: z.string().nullable().optional(),
+  error: z.string().nullable().optional(),
+  last_generation_settings: z.record(z.string(), z.unknown()).nullable().optional(),
+  generation_duration_seconds: z.number().nullable().optional(),
+});
+export type GeneratedImage = z.infer<typeof GeneratedImageSchema>;
+
 export const CharacterSchema = z.object({
   id: z.string(),
   order: z.number(),
@@ -65,6 +89,8 @@ export const CharacterSchema = z.object({
   reference_videos: z.array(ReferenceVideoSchema).default([]),
   active_reference_video_id: z.string().nullable().optional(),
   model_tags: z.array(ModelTagSchema).optional().default([]),
+  image_gen: CharacterImageGenSchema.default({ provider: "comfyui", lora: "", lora_multiplier: 1, trigger: "" }),
+  generated_images: z.array(GeneratedImageSchema).default([]),
 });
 export type Character = z.infer<typeof CharacterSchema>;
 
@@ -194,8 +220,33 @@ export const OptionsSchema = z.object({
   resolutions: z.array(ChoiceSchema),
   attention_modes: z.array(ChoiceSchema),
   memory_profiles: z.array(ChoiceSchema),
+  loras: z.array(z.string()),
 });
 export type Options = z.infer<typeof OptionsSchema>;
+
+export const ActiveJobSchema = z.object({
+  job_id: z.string(),
+  status: z.enum(["running", "queued"]),
+  started_at: z.number().nullable().optional(),
+  position: z.number(),
+  kind: z.string(),
+  label: z.string(),
+  target_id: z.string().nullable().optional(),
+  video_id: z.string().nullable().optional(),
+  video_title: z.string().nullable().optional(),
+  character_id: z.string().nullable().optional(),
+  character_name: z.string().nullable().optional(),
+});
+export type ActiveJob = z.infer<typeof ActiveJobSchema>;
+
+export const ImageProviderSchema = z.object({
+  id: z.enum(["comfyui", "wangp"]),
+  name: z.string(),
+  available: z.boolean(),
+  loras: z.array(z.string()),
+  note: z.string().optional().default(""),
+});
+export type ImageProvider = z.infer<typeof ImageProviderSchema>;
 
 export const ModelStatusSchema = z.object({
   model_type: z.string().nullable(),

@@ -47,6 +47,27 @@
   }
 }
 
+/* Vidstack's default player skin reads entirely from --media-* custom
+   properties (see @vidstack/react/player/styles/default/theme.css) -- point
+   them at this app's own already-theme-aware tokens instead of Vidstack's
+   defaults, so the player follows light/dark automatically and looks like
+   part of the app rather than a bolted-on widget. */
+:root {
+  --media-font-family: inherit;
+  --media-brand: var(--accent);
+  --media-focus-ring-color: var(--accent);
+  --media-button-hover-bg: color-mix(in srgb, var(--accent) 25%, transparent);
+  --media-menu-bg: var(--bg-alt);
+  --media-menu-border: 1px solid var(--border);
+  --media-menu-text-color: var(--text-h);
+  --media-menu-item-hover-bg: color-mix(in srgb, var(--accent) 15%, transparent);
+  --media-tooltip-bg-color: var(--bg-alt);
+  --media-tooltip-color: var(--text-h);
+  --media-time-font-size: 13px;
+  --media-slider-track-height: 8px;
+  --media-slider-focused-track-height: 10px;
+}
+
 /* Element resets live in Tailwind's own "base" layer so a Tailwind utility
    class (e.g. bg-accent on a <button>) still wins in the cascade -- an
    unlayered rule here would otherwise always beat a layered utility class
@@ -122,4 +143,28 @@
 
 @keyframes status-spin {
   to { transform: rotate(360deg); }
+}
+
+/* Carousel peek-row slide-in -- re-keyed on the clip index (see
+   ClipCarousel.tsx) so the animation restarts on every navigation. Sliding
+   in FROM the side you navigated TOWARD (clicking a right-side neighbor
+   slides the row in from the right) mimics the row having physically moved
+   that direction, even though the underlying implementation just swaps
+   which clips are rendered rather than continuously translating a strip. */
+@keyframes carousel-slide-from-right {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes carousel-slide-from-left {
+  from { transform: translateX(-24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.carousel-slide-from-right {
+  animation: carousel-slide-from-right 0.22s ease-out;
+}
+
+.carousel-slide-from-left {
+  animation: carousel-slide-from-left 0.22s ease-out;
 }

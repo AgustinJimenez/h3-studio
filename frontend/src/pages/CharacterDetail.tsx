@@ -22,6 +22,9 @@ import StatusBadge from "../components/StatusBadge";
 import GenerationParams from "../components/GenerationParams";
 import RetentionSelect from "../components/RetentionSelect";
 import ShotPromptEditor from "../components/ShotPromptEditor";
+import VideoPlayer from "../components/VideoPlayer";
+import CharacterImageStudio from "../components/CharacterImageStudio";
+import { jobTargetDomId } from "../lib/jobFocus";
 import type { ReferenceVideo, ModelTag } from "../schemas";
 
 const REFERENCE_TYPES = ["image", "video", "audio"] as const;
@@ -138,7 +141,7 @@ export default function CharacterDetail() {
         {character.references.map((ref) => {
           const filename = ref.path.split(/[\\/]/).pop() || ref.path;
           return (
-            <div key={ref.id} className="flex flex-col gap-2 rounded-lg border border-border bg-bg-alt p-2.5">
+            <div key={ref.id} id={jobTargetDomId(ref.id)} className="flex flex-col gap-2 rounded-lg border border-border bg-bg-alt p-2.5">
               <span className="w-fit rounded-full bg-status-draft px-2 py-0.5 text-xs uppercase text-white">{ref.type}</span>
               {ref.type === "audio" ? (
                 <ReferenceThumb type={ref.type} path={ref.upscale?.status === "done" ? ref.upscale.output_path : ref.path} />
@@ -188,6 +191,16 @@ export default function CharacterDetail() {
           {uploadReference.isPending && <span className="text-xs opacity-75">Uploading…</span>}
         </div>
       </div>
+
+      <h2 className="mb-1 mt-5 text-xl font-bold">Character images</h2>
+      <p className="mb-2 text-sm opacity-75">
+        Generate stills of this character with Qwen-Image 2.1 and their LoRA — from text, or by editing an existing
+        image (new outfit, angle, prop). Best used for <b>outfits</b>: "Use as outfit ref" gives H3 the clothes without
+        touching the face. For the face itself a sharp real photo works best — H3 follows the cleanest face it gets, and a
+        generated one pulls the likeness toward Qwen's version. Describe the person's build and features in the prompt
+        (e.g. "stocky, round face, goatee, glasses"); the trigger word alone can drift to a generic person.
+      </p>
+      <CharacterImageStudio videoId={id} character={character} />
 
       <h2 className="mb-1 mt-5 text-xl font-bold">Reference video studio</h2>
       <p className="mb-2 text-sm opacity-75">
@@ -280,7 +293,7 @@ function ReferenceVideoCard({
   }
 
   return (
-    <details open className="rounded-lg border border-border bg-bg-alt p-3.5">
+    <details open id={jobTargetDomId(rv.id)} className="rounded-lg border border-border bg-bg-alt p-3.5">
       <summary className="cursor-pointer font-semibold text-text-h">
         {rv.name || "Reference video"} — <StatusBadge status={rv.status === "none" ? "draft" : rv.status} label={rv.status} />
         {isActive && <span className="ml-1.5 inline-block"><StatusBadge status="done" label="active" /></span>}
@@ -348,7 +361,7 @@ function ReferenceVideoCard({
         <button className="border-0 bg-transparent p-0 text-danger" onClick={onDelete}>Delete</button>
       </div>
       {rv.error && <div className="mt-2 whitespace-pre-wrap rounded border border-danger bg-red-950/30 px-3 py-2 text-danger">{rv.error}</div>}
-      {rv.output_url && <video controls width={320} className="mt-1.5 max-w-full rounded" src={mediaUrl(rv.output_url) ?? undefined} />}
+      {rv.output_url && <VideoPlayer className="mt-1.5 max-w-[320px] rounded" src={mediaUrl(rv.output_url)} />}
       <GenerationParams settings={rv.last_generation_settings} durationSeconds={rv.generation_duration_seconds} />
 
       {rv.status === "done" && (
@@ -366,12 +379,10 @@ function ReferenceVideoCard({
 
           {captureSourceUrl && (
             <>
-              <video
-                controls
-                width={320}
-                className="mt-1.5 max-w-full rounded"
-                src={mediaUrl(captureSourceUrl) ?? undefined}
-                onTimeUpdate={(e) => setCaptureTime(e.currentTarget.currentTime)}
+              <VideoPlayer
+                className="mt-1.5 max-w-[320px] rounded"
+                src={mediaUrl(captureSourceUrl)}
+                onTimeUpdate={setCaptureTime}
               />
               <div className="mt-2 flex items-center gap-3">
                 <span>Scrub to a frame, then:</span>

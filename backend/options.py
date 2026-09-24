@@ -73,10 +73,15 @@ def get_generation_options(session: Any, model_type: str | None = None) -> dict[
             attention_choices.append(("sol: Sol sparse attention (Triton, RTX 40xx+)", "sol"))
         attention_modes = _choice_list(attention_choices)
 
+    loras: list[str] = []
+    if selected_model_type is not None:
+        loras = list(session.list_loras(selected_model_type).get("loras") or [])
+
     return {
         "model_types": model_types,
         "selected_model_type": selected_model_type,
         "resolutions": resolutions,
         "attention_modes": attention_modes,
         "memory_profiles": memory_profiles,
+        "loras": loras,
     }
