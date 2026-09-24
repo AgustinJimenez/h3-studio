@@ -187,3 +187,53 @@ A small local app for building multi-clip H3 sequences without hand-editing sett
     - At 100.5s (Clip 23): $31.90 / 255$
     - *Result*: **100% lighting stability across 23 VAE iterations** with zero progressive decay.
   - *System Boundary*: At Clip #24, the accumulated CPU memory of the 23-clip prefix reached ~15.7GB, triggering PyTorch's `DefaultCPUAllocator`. For sequences longer than 2 minutes, splitting into 1-to-2-minute master acts and joining via ffmpeg concat is the recommended pattern.
+
+## H3 prompt background (moved/copied from wan2.1gp/AGENTS.md, 2026-09-23)
+
+- **Why this app builds the Ref2VA prompt sections by hand: H3-Context-IR is not open source.** From `huggingface.co/MiniMaxAI/MiniMax-H3`'s model card (checked 2026-08-18): H3-Context-IR is a **hosted** preprocessing layer that takes free-form multimodal input and does "instruction parsing, cross-modal association, temporal understanding, and complex logical reasoning" to derive the structured six-section Ref2VA prompt (`subject_definitions`, `retention_analysis`, ...). Verbatim: *"Because H3-Context-IR relies on a multi-stage workflow and multiple hosted models and services, it is not included in this open-source release."* So `prompt.py::compose_subject_definitions` / `compose_retention_analysis`, the reference `note` / `attribute_transfer` wiring, the anti-duplication cardinality directives and the spatial formula below are this project's rule-based stand-in for what Context-IR does on MiniMax's platform.
+- **Spatial transitions (stairs, doorways, entering/exiting rooms).** Diffusion models lose spatial continuity here unless the prompt gives strict physical pre-states and one-way vectors (proven on the mansion Scene 1 doorway crossing):
+  1. **Fixed camera anchor**: e.g. *"Static camera positioned at the base of the staircase looking up at empty wooden steps."*
+  2. **Pre-action state**: e.g. *"All 3 characters initially stand on the ground floor at the base of the stairs; no one is on the upper steps yet."*
+  3. **Unidirectional vector**: e.g. *"Santamaría leads upward, step by step, strictly in one forward-upward direction without stopping, hesitating, or turning around."*
+  4. **Threshold/landing hand-off**: in the next clip, put the camera on the destination side (e.g. *"Static camera on the 2nd-floor landing looking down as the characters' heads emerge over the top step"*).
+  5. **Negative constraints**: *"NO characters appearing on both top and bottom simultaneously, NO walking backward, NO looping on stairs."*
+- **Voice casting profiles (vocal timbre anchors), Neutral Latin American Spanish.** H3's audio can drift into Peninsular *ceceo* or inconsistent timbres without explicit anchors. Inline `<d>` tags used so far:
+  - **Santamaría**: Michael Scott (Steve Carell), expressive, dynamic, slightly dramatic charismatic mid-range male voice. `<Subject 1> (S1) <d>[Speaker S1, Michael Scott vocal timbre, Steve Carell voice profile, expressive male voice, Neutral Latin American Spanish, use tú, <emotion>] ...</d>`
+  - **Lafi**: Pam Beesly (Jenna Fischer), gentle, clear, melodic, sweet youthful female voice. `<Subject 2> (S2) <d>[Speaker S2, Pam Beesly vocal timbre, Jenna Fischer voice profile, gentle clear female voice, Neutral Latin American Spanish, use tú, <emotion>] ...</d>`
+  - **Markos**: Kevin Malone (Brian Baumgartner), deep, slow-paced, resonant, slightly raspy, comical, worried male voice. `<Subject 3> (S3) <d>[Speaker S3, Kevin Malone vocal timbre, Brian Baumgartner voice profile, deep slow resonant male voice, Neutral Latin American Spanish, use tú, <emotion>] ...</d>`
+  - Diction: standardize on **tú** (tienes, puedes); no voseo (tenés) and no vosotros (tenéis). See also the `[[neutral_spanish]]` prompt tag above.
+
+## Frontend testing gotcha (moved from wan2.1gp/AGENTS.md)
+
+- **chrome-devtools MCP's `fill` / `fill_form` don't reliably trigger React's controlled-input `onChange` in this app's frontend** (found 2026-08-19 on the Animate Jobs page). They report success and the DOM shows the value, but React state never gets it, so a submit reads empty fields and fires no request, with no console error. **Use `click` (focus) + `type_text` (real keystrokes) for text inputs**; `fill` / `fill_form` are fine for native `<select>` and checkboxes.
+
+## Character images (Qwen-Image 2.1), ComfyUI provider, queue widget (built 2026-09-23)
+
+- **Character images** (CharacterDetail, `components/CharacterImageStudio.tsx`): per-character Qwen-Image 2.1 stills, from text or by editing existing references/generated images (sources are referenced in the prompt as `<image1>`, `<image2>`...). Per-character settings live in `character.image_gen` = `{provider, lora, lora_multiplier, trigger}`; the trigger is prepended to every prompt. Results are stored in `character.generated_images[]`. Endpoints:
+  - `POST /videos/{v}/characters/{c}/generated-images` (count 1-4, seed -1 = random, entry i uses seed+i)
+  - `DELETE .../generated-images/{id}` (keeps the file if it's in use as a reference)
+  - `POST .../generated-images/{id}/use-as-reference` with body `{note}`
+  - `GET /character-images/options` (providers + their LoRA lists)
+- **Outfit vs identity refs.** `use-as-reference` with `note: "wardrobe and outfit"` keeps the image out of the identity clause: `compose_subject_definitions` renders "...whose wardrobe and outfit comes from <Picture N>". An empty note makes it an identity ref. Calling again on the same image switches the role instead of duplicating it.
+- **Why outfit is the default use: identity test results (2026-09-23, videos "Qwen Ref Close-up Test - X/Y/Z/W", seed 777, same close-up talking shot):**
+  - X = real photo `mapache.png`: best likeness.
+  - Y = real photo + Qwen headshot ≈ Z = Qwen headshot only. H3 follows the **cleanest, most frontal** face it gets, and the Qwen image overrode the angled real selfie (darker skin, sharper features, thinner frames).
+  - W = the musubi-trained H3 LoRA (step 2000) with no refs: right features but a caricature (much heavier, wider face). Same over-weighting seen with photo + LoRA in the Matrix test, which also bled his face onto other people.
+  - **Takeaway:** use a sharp real frontal photo for identity; use Qwen images for outfits, props and angles. Qwen prompts must describe the person's build and features ("stocky, round full face, brown skin, goatee, black-framed glasses"): trigger + "front portrait" alone drifted to a slim young man.
+  - H3 rule found along the way: it needs at least as many visual refs as audio refs, so a voice-only character fails with "requires at least as many reference images and videos as audio references".
+- **Providers.**
+  - **ComfyUI (default)**: `backend/comfy.py`. Builds the proven GGUF graph: `UnetLoaderGGUF` Qwen-Image-2.1-Q4_K_M-HQv3 + `LoraLoaderModelOnly` + `TextEncodeQwenImage21` with `images.image_N` (which also provides the edit latent) + KSampler 25 steps, CFG 1. It uploads sources via `/upload/image`, polls `/history`, downloads via `/view`. About 28 s per text image and about 40 s per edit.
+  - **WanGP native Qwen 2.1** (`qwen_image_21_7B` int8, 40 steps, CFG 4): kept as an option but **edits come out crusty/broken with or without the LoRA** and it's 2-4x slower. Controlled A/B, same source/prompt/seed: ComfyUI was clean at both CFG 1/25 and CFG 4/40, so neither CFG nor the LoRA is the cause. Text-to-image works but has magenta/green edge speckles. WanGP loads the ComfyUI-format Qwen LoRA from `wan2.1gp/loras/qwen21/` as-is.
+  - Qwen LoRAs for all tipy characters are in ComfyUI `models/loras/<name>_qwen21_e2/3/4` (the dropdown filters to names containing "qwen").
+- **Single queue, no GPU fights.** `jobs.JobStore.submit_callable(runner, dest_path, ...)` runs non-WanGP work (ComfyUI) in the same FIFO slot as H3 clips. The ComfyUI runner releases WanGP's model first (`session.release_model()`) and calls ComfyUI `/free` after. A suffix-less `dest_path` keeps the produced file's extension.
+- **ComfyUI auto-start** (`comfy.manager`):
+  - It starts the portable install headless on the first ComfyUI job (`python_embeded\python.exe -s ComfyUI\main.py --windows-standalone-build --disable-auto-launch`, `CREATE_NO_WINDOW`, log in `backend/data/comfyui_autostart.log`). This adds ~30 s to that job.
+  - It stops the instance after 15 idle minutes (`COMFYUI_IDLE_MINUTES`) and on backend shutdown.
+  - It **only ever stops an instance it started**. The pid is saved to `backend/data/comfyui_autostart.pid` and re-adopted on startup (`adopt()`, which checks the cmdline for `main.py --disable-auto-launch` under COMFY_ROOT), so a force-killed backend doesn't leave an orphan. Tested: force-kill backend, restart, and ComfyUI idle-stopped 122 s later with a 2-min timeout.
+  - ComfyUI stops answering HTTP for a few seconds while `/free` unloads models. `ensure_running` treats "port open but not answering" as busy and waits; it doesn't spawn a second instance.
+  - Env overrides: `COMFYUI_URL`, `COMFYUI_ROOT`, `COMFYUI_PORTABLE`, `COMFYUI_IDLE_MINUTES`.
+- **Floating queue widget** (`components/QueueIndicator.tsx`, mounted in `router.tsx`, bottom-right; toasts are offset upward to sit above it). `GET /jobs/active` returns the **live** JobStore queue (`JobStore.snapshot()`: running first, then pending) mapped to its item (clip, clip upscale, reference video + its upscale, reference upscale, character image, animate job), so stale "running" statuses left by a restart never show. Clicking a row navigates and calls `lib/jobFocus.ts::requestFocus(id)`, which scrolls to the element `id="job-target-<id>"` and highlights it. VideoDetail switches to the Clips tab and ClipCarousel jumps to the clip via `useFocusTarget`.
+- **Gotchas:**
+  - **The queue has no cancel.** Restarting the backend drops queued and running jobs, and their stored status stays "queued"/"running" until regenerated.
+  - `jobs.py` was already racy in the same way before (the record is marked done just before `on_done` clears the active slot); `_CallableRecord` mirrors it.
+  - The Vitest suites currently fail to load (`@testing-library/dom` missing). This predates this work; `tsc -b` is the check used.
