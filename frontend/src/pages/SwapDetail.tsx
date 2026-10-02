@@ -8,7 +8,6 @@ import {
   useMergeScenes,
   usePatchPass,
   usePatchSwap,
-  usePlanSwap,
   useRerunPass,
   useRunSwap,
   useSetCuts,
@@ -101,7 +100,6 @@ export default function SwapDetail() {
   const setCuts = useSetCuts(id);
   const confirmScenes = useConfirmScenes(id);
   const [cutsDirty, setCutsDirty] = useState(false);
-  const plan = usePlanSwap(id);
   const run = useRunSwap(id);
   const rerun = useRerunPass(id);
   const cancel = useCancelPass(id);
@@ -147,7 +145,6 @@ export default function SwapDetail() {
     merge.isPending ||
     setCuts.isPending ||
     confirmScenes.isPending ||
-    plan.isPending ||
     run.isPending ||
     detect.isPending;
   const castName = (castId: string | null) =>
@@ -432,58 +429,17 @@ export default function SwapDetail() {
       {castSaved && (
         <Section
           title="3 · Scenes"
-          defaultOpen={project.passes.length === 0}
-          summary={`${project.scenes.length} scenes · ${new Set(project.passes.map((p) => p.scene_index)).size} with swaps`}
-        >
-          <p className="mb-2 text-xs text-text-muted">
-            Save the cast first, then say who is replaced in each scene. Scenes
-            without anyone assigned keep the original footage.
-          </p>
-          <div className="space-y-3">
-            {project.scenes.map((s, i) => (
-              <SwapSceneCard
-                key={`${s.start_frame_src}-${s.end_frame_src}-${project.cast.length}`}
-                scene={s}
-                sourceUrl={project.source_url}
-                fps={project.source.fps}
-                aspect={
-                  project.source.width / Math.max(1, project.source.height)
-                }
-                cast={project.cast}
-                isLast={i === project.scenes.length - 1}
-                busy={busy || activeCount > 0}
-                onSave={(p) => patch.mutate({ scenes: [p] })}
-                onMerge={() => merge.mutate(s.index)}
-              />
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {castSaved && (
-        <Section
-          key={project.passes.length > 0 ? "with-passes" : "no-passes"}
-          title="4 · Run and results"
-          defaultOpen={project.passes.length > 0}
-          summary="nothing rendered yet"
+          summary={`${project.scenes.length} scenes · ${new Set(project.passes.map((p) => p.scene_index)).size} with swaps · ${doneCount}/${project.passes.length} passes done`}
         >
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <select
-              value={quality}
-              onChange={(e) => setQuality(e.target.value)}
-            >
+            <select value={quality} onChange={(e) => setQuality(e.target.value)}>
               <option value="preview">Preview (turbo, 4 steps, fast)</option>
               <option value="accel8">Accel 8 steps (experimental LoRA)</option>
               <option value="final">Final (20 steps, slow)</option>
             </select>
-            <select
-              value={size}
-              onChange={(e) => setSize(e.target.value)}
-              title="Render size for the next runs (shorter side)"
-            >
+            <select value={size} onChange={(e) => setSize(e.target.value)} title="Render size for the next runs (shorter side)">
               <option value="">
-                Size: project ({project.settings.width}×
-                {project.settings.height})
+                Size: project ({project.settings.width}×{project.settings.height})
               </option>
               <option value="320">320p (fast test)</option>
               <option value="480">480p</option>
@@ -503,27 +459,14 @@ export default function SwapDetail() {
                 className="absolute right-1 top-1/2 -translate-y-1/2 border-0 bg-transparent p-1 text-text-muted hover:text-text-h"
                 title="Random seed"
                 aria-label="Random seed"
-                onClick={() =>
-                  setSeed(String(Math.floor(Math.random() * 1_000_000)))
-                }
+                onClick={() => setSeed(String(Math.floor(Math.random() * 1_000_000)))}
               >
                 <Dices size={16} />
               </button>
             </div>
           </div>
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <button
-              disabled={busy || activeCount > 0}
-              onClick={() => plan.mutate()}
-            >
-              Build plan
-            </button>
-            <button
-              disabled={busy || project.passes.length === 0}
-              onClick={() =>
-                run.mutate({ quality, sceneIndex: null, overrides })
-              }
-            >
+            <button disabled={busy || project.passes.length === 0} onClick={() => run.mutate({ quality, sceneIndex: null, overrides })}>
               Run all
             </button>
             <span className="text-xs text-text-muted">
@@ -531,17 +474,14 @@ export default function SwapDetail() {
               {activeCount > 0 ? ` · ${activeCount} queued/running` : ""}
             </span>
           </div>
-          {project.plan_notes.map((n) => (
-            <div key={n} className="mb-1 text-xs text-text-muted">
-              {n}
-            </div>
-          ))}
+          <p className="mb-2 text-xs text-text-muted">
+            Say who is replaced in each scene and save it: that plans the scene and builds its prompt. Scenes without anyone assigned keep the original
+            footage.
+          </p>
           {previewOnlyScenes.length > 0 && (
             <div className="mb-2 rounded border border-amber-500/50 px-3 py-2 text-xs text-amber-400">
-              Scenes {previewOnlyScenes.join(", ")} only have preview renders
-              (turbo: softer, can show colour drift). Pick Final and press “Re-run”
-              on a scene (only that scene is re-planned and re-rendered) or
-              “Run all” (re-plans everything) for the deliverable.
+              Scenes {previewOnlyScenes.join(", ")} only have preview renders (turbo: softer, can show colour drift). Pick Final and press “Re-run” on a scene
+              (only that scene is re-planned and re-rendered) or “Run all” for the deliverable.
             </div>
           )}
 
@@ -568,162 +508,87 @@ export default function SwapDetail() {
             </div>
           )}
           {playMode === "loop" && (
-            <SwapPlaylist
-              items={playlist}
-              sourceUrl={project.source_url}
-              fps={project.source.fps}
-              aspect={project.source.width / Math.max(1, project.source.height)}
-            />
+            <SwapPlaylist items={playlist} sourceUrl={project.source_url} fps={project.source.fps} aspect={project.source.width / Math.max(1, project.source.height)} />
           )}
 
-          <div className="space-y-5">
-            {project.scenes.map((s) => {
-              const passes = project.passes.filter(
-                (p) => p.scene_index === s.index,
-              );
-              if (passes.length === 0) {
-                // Not swapped: shown as original footage so the scenes read in order and nothing looks missing.
-                return playMode === "individual" &&
-                  project.passes.length > 0 ? (
-                  <div key={s.index} className="space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-text-h">
-                        Scene {s.index + 1}
-                      </span>
-                      <span className="text-xs text-text-muted">
-                        original footage, not swapped
-                      </span>
-                    </div>
-                    <SwapCompare
-                      scene={s}
-                      sourceUrl={project.source_url}
-                      fps={project.source.fps}
-                      resultUrl={null}
-                      resultLabel="original"
-                      idle={activeCount === 0}
-                      showTitle={false}
-                      aspect={
-                        project.source.width /
-                        Math.max(1, project.source.height)
-                      }
-                    />
-                  </div>
-                ) : null;
-              }
-              const last = passes
-                .filter((p) => p.status === "done")
-                .sort((a, b) => b.order - a.order)[0];
+          <div className="space-y-4">
+            {project.scenes.map((s, i) => {
+              const passes = project.passes.filter((p) => p.scene_index === s.index);
+              const last = passes.filter((p) => p.status === "done").sort((a, b) => b.order - a.order)[0];
+              const aspect = project.source.width / Math.max(1, project.source.height);
               return (
-                <div key={s.index} className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-text-h">
-                      Scene {s.index + 1}
-                    </span>
-                  </div>
-                  {playMode === "individual" && last && (
-                    <SwapSceneResults
-                      scene={s}
-                      pass={last}
-                      sourceUrl={project.source_url}
-                      fps={project.source.fps}
-                      aspect={
-                        project.source.width /
-                        Math.max(1, project.source.height)
-                      }
-                      idle={activeCount === 0}
-                      projectSize={project.settings}
-                      onUse={(runId) =>
-                        useRun.mutate({ passId: last.id, runId })
-                      }
-                      onDelete={(runId) =>
-                        deleteRun.mutate({ passId: last.id, runId })
-                      }
-                      onTrim={(frames) =>
-                        trimPass.mutate({ passId: last.id, frames })
-                      }
-                      onFullRun={(runSeed) =>
-                        rerun.mutate({
-                          passId: passes
-                            .filter((p) => p.chunk_index === last.chunk_index)
-                            .sort((a, b) => a.order - b.order)[0].id,
-                          overrides: {
-                            size: Math.min(
-                              project.settings.width,
-                              project.settings.height,
-                            ),
-                            seed: runSeed,
-                          },
-                        })
-                      }
-                    />
+                <SwapSceneCard
+                  key={`${s.start_frame_src}-${s.end_frame_src}-${project.cast.length}`}
+                  scene={s}
+                  sourceUrl={project.source_url}
+                  fps={project.source.fps}
+                  aspect={aspect}
+                  cast={project.cast}
+                  isLast={i === project.scenes.length - 1}
+                  busy={busy}
+                  sceneBusy={passes.some((p) => p.status === "queued" || p.status === "running")}
+                  hasResults={passes.some((p) => p.status === "done")}
+                  hideMedia={playMode === "individual" && !!last}
+                  onSave={(p) => patch.mutate({ scenes: [p] })}
+                  onMerge={() => merge.mutate(s.index)}
+                >
+                  {passes.length > 0 && (
+                    <div className="space-y-2">
+                      {passes.map((p) => (
+                        <SwapPassRow
+                          key={p.id}
+                          pass={p}
+                          label={personLabel(p.scene_index, p.person_id)}
+                          onSavePrompt={(prompt) => savePrompt.mutate({ passId: p.id, prompt })}
+                          onRun={(ownSeed) => run.mutate({ quality, sceneIndex: p.scene_index, overrides: withSeed(ownSeed) })}
+                          onRerun={(ownSeed) =>
+                            // Another quality than the pass was planned with: the scene is re-planned at the chosen one, then run.
+                            p.quality !== quality
+                              ? run.mutate({ quality, sceneIndex: p.scene_index, overrides: withSeed(ownSeed) })
+                              : rerun.mutate({ passId: p.id, overrides: withSeed(ownSeed) })
+                          }
+                          onCancel={() => cancel.mutate(p.id)}
+                        />
+                      ))}
+                      {playMode === "individual" && last && (
+                        <SwapSceneResults
+                          scene={s}
+                          pass={last}
+                          sourceUrl={project.source_url}
+                          fps={project.source.fps}
+                          aspect={aspect}
+                          idle={activeCount === 0}
+                          projectSize={project.settings}
+                          onUse={(runId) => useRun.mutate({ passId: last.id, runId })}
+                          onDelete={(runId) => deleteRun.mutate({ passId: last.id, runId })}
+                          onTrim={(frames) => trimPass.mutate({ passId: last.id, frames })}
+                          onFullRun={(runSeed) =>
+                            rerun.mutate({
+                              passId: passes.filter((p) => p.chunk_index === last.chunk_index).sort((a, b) => a.order - b.order)[0].id,
+                              overrides: { size: Math.min(project.settings.width, project.settings.height), seed: runSeed },
+                            })
+                          }
+                        />
+                      )}
+                    </div>
                   )}
-                  {passes.map((p) => (
-                    <SwapPassRow
-                      key={p.id}
-                      pass={p}
-                      label={personLabel(p.scene_index, p.person_id)}
-                      onSavePrompt={(prompt) =>
-                        savePrompt.mutate({ passId: p.id, prompt })
-                      }
-                      onRun={(ownSeed) =>
-                        run.mutate({
-                          quality,
-                          sceneIndex: p.scene_index,
-                          overrides: withSeed(ownSeed),
-                        })
-                      }
-                      onRerun={(ownSeed) =>
-                        // Another quality than the pass was planned with: the scene is re-planned at the chosen one, then run.
-                        p.quality !== quality
-                          ? run.mutate({
-                              quality,
-                              sceneIndex: p.scene_index,
-                              overrides: withSeed(ownSeed),
-                            })
-                          : rerun.mutate({
-                              passId: p.id,
-                              overrides: withSeed(ownSeed),
-                            })
-                      }
-                      onCancel={() => cancel.mutate(p.id)}
-                    />
-                  ))}
-                </div>
+                </SwapSceneCard>
               );
             })}
           </div>
 
           <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-border pt-4">
-            <button
-              disabled={busy || assemble.isPending || activeCount > 0}
-              onClick={() => assemble.mutate()}
-            >
+            <button disabled={busy || assemble.isPending || activeCount > 0} onClick={() => assemble.mutate()}>
               {assemble.isPending ? "Assembling…" : "Assemble final video"}
             </button>
-            <span className="text-xs text-text-muted">
-              Uses the original audio; scenes without swaps use the original
-              footage.
-            </span>
-            <span className="text-xs text-text-muted">
-              {(project.size_bytes / 1e6).toFixed(0)} MB on disk
-            </span>
+            <span className="text-xs text-text-muted">Uses the original audio; scenes without swaps use the original footage.</span>
+            <span className="text-xs text-text-muted">{(project.size_bytes / 1e6).toFixed(0)} MB on disk</span>
           </div>
-          {project.final.error && (
-            <div className="mt-2 text-xs text-danger">
-              {project.final.error}
-            </div>
-          )}
+          {project.final.error && <div className="mt-2 text-xs text-danger">{project.final.error}</div>}
           {project.final_url && (
             <div className="mt-3">
-              <VideoPlayer
-                className="max-h-96 rounded border border-border"
-                src={mediaUrl(project.final_url)}
-              />
-              <a
-                className="mt-1 inline-block text-sm"
-                href={mediaUrl(project.final_url) ?? "#"}
-                download
-              >
+              <VideoPlayer className="max-h-96 rounded border border-border" src={mediaUrl(project.final_url)} />
+              <a className="mt-1 inline-block text-sm" href={mediaUrl(project.final_url) ?? "#"} download>
                 Download
               </a>
             </div>

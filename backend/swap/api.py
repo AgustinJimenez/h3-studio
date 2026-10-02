@@ -286,6 +286,7 @@ def set_cuts(project_id: str, body: CutsBody):
 
     def apply(p: dict[str, Any]) -> None:
         store.set_scenes(p, built)
+        store.replan_scenes(p, [sc["index"] for sc in p["scenes"]])  # scenes that kept their people get their passes back
 
     updated = _mutate(project_id, apply)
     _write_thumbs(updated)
@@ -364,7 +365,12 @@ class PatchBody(BaseModel):
 
 @router.patch("/swaps/{project_id}")
 def patch_swap(project_id: str, body: PatchBody):
+    def scene_key(s: dict[str, Any]) -> tuple:
+        return (s.get("background_text") or "", tuple((x["id"], x.get("cast_id"), x.get("target_description"), x["order"]) for x in s.get("people") or []))
+
     def apply(p: dict[str, Any]) -> None:
+        before = {s["index"]: scene_key(s) for s in p["scenes"]}
+        old_cast = {c["id"]: c for c in p["cast"]}
         if body.title is not None:
             p["title"] = body.title
         if body.settings:
@@ -379,6 +385,7 @@ def patch_swap(project_id: str, body: PatchBody):
             p["cast"] = [{"id": c.get("id") or store.uuid.uuid4().hex, "name": c.get("name", ""), "image_path": c.get("image_path", ""),
                           "appearance": c.get("appearance", ""), "outfit": c.get("outfit", ""), "body": c.get("body", ""),
                           "source_character_id": c.get("source_character_id")} for c in body.cast]
+        changed_cast = {c["id"] for c in p["cast"] if old_cast.get(c["id"]) != c}
         for patch in body.scenes or []:
             match = next((s for s in p["scenes"] if s["index"] == patch.get("index")), None)
             if match is None:
@@ -389,6 +396,14 @@ def patch_swap(project_id: str, body: PatchBody):
                 match["people"] = [{"id": x.get("id") or store.uuid.uuid4().hex, "cast_id": x.get("cast_id"),
                                     "target_description": x.get("target_description", ""), "order": int(x.get("order", i))}
                                    for i, x in enumerate(patch["people"] or [])]
+        # Planning follows the scene: only scenes that changed (or use a changed character) get fresh passes and prompts.
+        touched = [s["index"] for s in p["scenes"]
+                   if scene_key(s) != before.get(s["index"]) or any(x.get("cast_id") in changed_cast for x in s.get("people") or [])]
+        if touched:
+            try:
+                store.replan_scenes(p, touched)
+            except store.Busy as exc:
+                raise HTTPException(409, f"scene {exc} is queued or running; wait or cancel it first")
 
     return project_view(_mutate(project_id, apply))
 

@@ -151,10 +151,11 @@ def test_run_other_quality_for_one_scene_keeps_finished_passes_of_other_scenes()
         assert later["status"] == "done" and later["quality"] == "final" and later["output_path"] == "x.mp4"
 
 
-def test_run_without_plan_is_400_and_unknown_ids_404():
+def test_run_with_nobody_assigned_is_400_and_unknown_ids_404():
     tmp, tc, js, cl, video = _env()
     with tmp:
-        pid, _ = _setup_project(tc, video)
+        pid = _create(tc, video)["id"]
+        tc.post(f"/swaps/{pid}/detect-scenes")  # scenes, but nobody is assigned in any of them, so nothing is planned
         assert tc.post(f"/swaps/{pid}/run", json={"quality": "final", "scene_index": None}).status_code == 400
         assert tc.get("/swaps/nope").status_code == 404
         assert tc.delete("/swaps/nope").status_code == 404
@@ -354,6 +355,7 @@ def test_set_cuts_rebuilds_scenes_at_exact_frames_and_keeps_people_of_unchanged_
         assert [s["index"] for s in sc] == [0, 1, 2, 3]
         assert [len(s["people"]) for s in sc] == [1, 0, 0, 0]  # only scene 0 kept its exact range, so only it keeps its people
         assert all(s["thumb_url"] and s["clip_url"] for s in sc)
+        assert [p["scene_index"] for p in r.json()["passes"]] == [0]  # the scene that kept its person is planned again
 
 
 def test_set_cuts_rejects_frames_outside_the_video_and_while_running():
@@ -411,6 +413,72 @@ def test_projects_made_before_confirmation_existed_count_as_confirmed_when_they_
     assert st._migrate({"scenes": [{"chunks": []}], "cast": [{"id": "c"}], "passes": []})["scenes_confirmed"] is True
     assert st._migrate({"scenes": [{"chunks": []}], "cast": [], "passes": []})["scenes_confirmed"] is False
     assert st._migrate({"scenes": [], "cast": [], "passes": [], "scenes_confirmed": True})["scenes_confirmed"] is True
+
+
+def _scene_patch(index, people, background=""):
+    return {"index": index, "background_text": background,
+            "people": [{"id": pid, "cast_id": cid, "target_description": t, "order": i} for i, (pid, cid, t) in enumerate(people)]}
+
+
+def _passes_by_scene(view):
+    return {p["scene_index"]: p for p in view["passes"]}
+
+
+def test_saving_a_scene_plans_only_that_scene_and_leaves_the_others_results_alone():
+    tmp, tc, js, cl, video = _env()
+    with tmp:
+        pid, _ = _setup_project(tc, video)  # scenes 0 and 2 have a person, so they already have passes
+        view = tc.get(f"/swaps/{pid}").json()
+        assert sorted(_passes_by_scene(view)) == [0, 2]
+        done = _passes_by_scene(view)[2]
+        store.update_pass(pid, done["id"], status="done", output_path="x.mp4", seconds=5)
+        r = tc.patch(f"/swaps/{pid}", json={"scenes": [_scene_patch(0, [("p1", "c1", "the man")], "A plain wall.")]})
+        assert r.status_code == 200, r.text
+        by = _passes_by_scene(r.json())
+        assert by[0]["status"] == "draft" and "A plain wall." in by[0]["prompt"]
+        assert by[2]["id"] == done["id"] and by[2]["status"] == "done" and by[2]["output_path"] == "x.mp4"
+
+
+def test_saving_a_scene_with_nothing_changed_keeps_an_edited_prompt():
+    tmp, tc, js, cl, video = _env()
+    with tmp:
+        pid, _ = _setup_project(tc, video)
+        p0 = _passes_by_scene(tc.get(f"/swaps/{pid}").json())[0]
+        tc.patch(f"/swaps/{pid}/passes/{p0['id']}", json={"prompt": "my own prompt"})
+        r = tc.patch(f"/swaps/{pid}", json={"scenes": [_scene_patch(0, [("p1", "c1", "the man")])]})
+        assert _passes_by_scene(r.json())[0]["prompt"] == "my own prompt"
+
+
+def test_a_scene_gets_its_pass_when_a_person_is_added_and_loses_it_when_the_last_is_removed():
+    tmp, tc, js, cl, video = _env()
+    with tmp:
+        pid, _ = _setup_project(tc, video)
+        r = tc.patch(f"/swaps/{pid}", json={"scenes": [_scene_patch(1, [("p9", "c1", "the woman")])]})
+        assert sorted(_passes_by_scene(r.json())) == [0, 1, 2]
+        r = tc.patch(f"/swaps/{pid}", json={"scenes": [_scene_patch(1, [])]})
+        assert sorted(_passes_by_scene(r.json())) == [0, 2]
+        # a person with no character chosen yet is not planned (no half-filled blocked pass)
+        r = tc.patch(f"/swaps/{pid}", json={"scenes": [_scene_patch(1, [("p9", None, "the woman")])]})
+        assert sorted(_passes_by_scene(r.json())) == [0, 2]
+
+
+def test_changing_a_cast_entry_refreshes_the_prompts_of_the_scenes_that_use_it():
+    tmp, tc, js, cl, video = _env()
+    with tmp:
+        pid, _ = _setup_project(tc, video)
+        cast = [{"id": "c1", "name": "Lafi", "image_path": "lafi.png", "appearance": "a slim woman", "outfit": "a red coat", "body": "slim"}]
+        r = tc.patch(f"/swaps/{pid}", json={"cast": cast})
+        assert len(r.json()["passes"]) == 2 and all("a red coat" in p["prompt"] for p in r.json()["passes"])
+
+
+def test_saving_a_scene_is_refused_while_its_pass_is_running():
+    tmp, tc, js, cl, video = _env()
+    with tmp:
+        pid, _ = _setup_project(tc, video)
+        tc.post(f"/swaps/{pid}/run", json={"quality": "preview", "scene_index": 0})
+        r = tc.patch(f"/swaps/{pid}", json={"scenes": [_scene_patch(0, [("p1", "c1", "someone else")])]})
+        assert r.status_code == 409
+        assert _passes_by_scene(tc.get(f"/swaps/{pid}").json())[0]["status"] == "queued"
 
 
 if __name__ == "__main__":

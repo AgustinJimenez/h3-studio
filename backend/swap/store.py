@@ -149,6 +149,28 @@ def build_plan(project: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+class Busy(Exception):
+    """A scene's passes are queued or running, so it cannot be re-planned."""
+
+
+def replan_scenes(project: dict[str, Any], indexes: list[int]) -> None:
+    """Re-plans only these scenes (fresh prompts and passes, the runs already made stay in their history); every other
+    scene keeps its passes, results and edited prompts. People with no character chosen yet are not planned."""
+    wanted = set(indexes)
+    old = [p for p in project["passes"] if p["scene_index"] in wanted]
+    if any(p["status"] in ("queued", "running") for p in old):
+        raise Busy(", ".join(str(i + 1) for i in sorted({p["scene_index"] for p in old if p["status"] in ("queued", "running")})))
+    trial = copy.deepcopy(project)
+    for scene in trial["scenes"]:
+        scene["people"] = [x for x in scene.get("people") or [] if x.get("cast_id")]
+    planned = build_plan(trial)
+    fresh = [p for p in planned["passes"] if p["scene_index"] in wanted]
+    carry_history(old, fresh)
+    project["passes"] = sorted([p for p in project["passes"] if p["scene_index"] not in wanted] + fresh,
+                               key=lambda x: (x["scene_index"], x["chunk_index"], x["order"]))
+    project["plan_notes"] = planned["plan_notes"]
+
+
 def update_pass(project_id: str, pass_id: str, **fields: Any) -> dict[str, Any]:
     def apply(project: dict[str, Any]) -> None:
         for p in project["passes"]:
