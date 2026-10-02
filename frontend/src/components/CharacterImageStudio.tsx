@@ -16,6 +16,7 @@ const ASPECTS = [
   { value: "square", label: "Square (1024x1024)" },
   { value: "portrait", label: "Portrait (896x1152)" },
   { value: "landscape", label: "Landscape (1152x896)" },
+  { value: "wide", label: "Wide 16:9 (1344x768) — storyboard frames" },
 ];
 const ACTIVE_STATUSES = new Set(["queued", "running"]);
 // Reference note for outfit-only use -- prompt.compose_subject_definitions turns
@@ -150,7 +151,7 @@ export default function CharacterImageStudio({ videoId, character }: { videoId: 
           <div className="mb-2">
             <div className="mb-1 text-sm opacity-75">
               Source images, in order (refer to them as &lt;image1&gt;, &lt;image2&gt;… in the prompt). The output keeps the first image's
-              size, so Aspect only applies to text mode. Upload new photos in References above.
+              size unless Aspect is Wide 16:9 (use that for storyboard first frames). Upload new photos in References above.
             </div>
             {sourceCandidates.length === 0 && <div className="text-sm text-danger">No image references or generated images yet.</div>}
             <div className="flex flex-wrap gap-2">

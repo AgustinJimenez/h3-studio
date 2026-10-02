@@ -254,7 +254,10 @@ def build_graph(params: dict[str, Any], uploaded_sources: list[str]) -> dict[str
             g[f"src{i}"] = {"class_type": "LoadImage", "inputs": {"image": name}}
             encode[f"images.image_{i}"] = [f"src{i}", 0]
         latent = ["5", 2]  # TextEncodeQwenImage21 emits the edit latent when given images
-    else:
+    if not uploaded_sources or params.get("aspect") == "wide":
+        # Text-to-image, or an edit forced to 16:9 (storyboard frames for H3
+        # clips): an empty latent at the chosen size; the sources still
+        # condition it through the text encoder.
         g["6"] = {"class_type": "EmptyLatentImage", "inputs": {"width": params["width"], "height": params["height"], "batch_size": 1}}
         latent = ["6", 0]
     g["5"] = {"class_type": "TextEncodeQwenImage21", "inputs": encode}

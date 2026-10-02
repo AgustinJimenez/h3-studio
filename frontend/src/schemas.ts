@@ -81,6 +81,7 @@ export type GeneratedImage = z.infer<typeof GeneratedImageSchema>;
 export const CharacterSchema = z.object({
   id: z.string(),
   order: z.number(),
+  kind: z.enum(["person", "environment"]).catch("person"),
   name: z.string().default(""),
   identity_description: z.string().default(""),
   wardrobe_notes: z.string().default(""),
@@ -117,6 +118,8 @@ export const ClipSchema = z.object({
   continue_from_previous: z.boolean().optional().default(false),
   continuation_keep_frames: z.number().nullable().optional(),
   bridge_to_next: z.boolean().optional().default(false),
+  start_frame_path: z.string().nullable().optional(),
+  control_video_path: z.string().nullable().optional(),
   active_character_ids: z.array(z.string()).nullable().optional(),
   status: StatusSchema.catch("draft"),
   job_id: z.string().nullable().optional(),
@@ -236,6 +239,11 @@ export const ActiveJobSchema = z.object({
   video_title: z.string().nullable().optional(),
   character_id: z.string().nullable().optional(),
   character_name: z.string().nullable().optional(),
+  swap_id: z.string().nullable().optional(),
+  progress: z
+    .object({ stage: z.string(), value: z.number().nullable().optional(), max: z.number().nullable().optional(), fraction: z.number().nullable().optional() })
+    .nullable()
+    .optional(),
 });
 export type ActiveJob = z.infer<typeof ActiveJobSchema>;
 
@@ -252,3 +260,152 @@ export const ModelStatusSchema = z.object({
   model_type: z.string().nullable(),
 });
 export type ModelStatus = z.infer<typeof ModelStatusSchema>;
+
+// ---------------------------------------------------------------- swap --
+
+export const SwapCastEntrySchema = z.object({
+  id: z.string(),
+  name: z.string().catch(""),
+  image_path: z.string().catch(""),
+  appearance: z.string().catch(""),
+  outfit: z.string().catch(""),
+  body: z.string().catch(""),
+  source_character_id: z.string().nullable().optional(),
+});
+export type SwapCastEntry = z.infer<typeof SwapCastEntrySchema>;
+
+export const SwapPersonSchema = z.object({
+  id: z.string(),
+  cast_id: z.string().nullable().catch(null),
+  target_description: z.string().catch(""),
+  order: z.number().catch(0),
+});
+export type SwapPerson = z.infer<typeof SwapPersonSchema>;
+
+export const SwapChunkSchema = z.object({
+  index: z.number(),
+  start: z.number(),
+  end: z.number(),
+  frames_24: z.number(),
+  padded_frames: z.number(),
+});
+
+export const SwapSceneSchema = z.object({
+  index: z.number(),
+  start_frame_src: z.number(),
+  end_frame_src: z.number(),
+  frames_24: z.number(),
+  chunks: z.array(SwapChunkSchema).catch([]),
+  background_text: z.string().catch(""),
+  people: z.array(SwapPersonSchema).catch([]),
+  thumb_url: z.string().nullable().optional(),
+  clip_url: z.string().nullable().optional(), // this scene of the original, cut into its own clip
+});
+export type SwapScene = z.infer<typeof SwapSceneSchema>;
+
+export const SwapRunSchema = z.object({
+  id: z.string(),
+  created_at: z.number().nullable().optional(),
+  quality: z.string().nullable().optional(),
+  width: z.number().nullable().optional(),
+  height: z.number().nullable().optional(),
+  seed: z.number().nullable().optional(),
+  seconds: z.number().nullable().optional(),
+  mean_luma: z.number().nullable().optional(),
+  output_url: z.string().nullable().optional(),
+  raw_url: z.string().nullable().optional(),
+  source_clip_url: z.string().nullable().optional(),
+  extra_loras: z.array(z.tuple([z.string(), z.number()])).catch([]),
+  active: z.boolean().catch(false),
+});
+export type SwapRun = z.infer<typeof SwapRunSchema>;
+
+export const SwapPassSchema = z.object({
+  id: z.string(),
+  scene_index: z.number(),
+  chunk_index: z.number(),
+  person_id: z.string(),
+  order: z.number(),
+  quality: z.string().catch("final"),
+  prompt: z.string().catch(""),
+  status: z.string().catch("draft"),
+  job_id: z.string().nullable().optional(),
+  output_path: z.string().nullable().optional(),
+  raw_path: z.string().nullable().optional(),
+  mean_luma: z.number().nullable().optional(),
+  error: z.string().nullable().optional(),
+  seconds: z.number().nullable().optional(),
+  output_url: z.string().nullable().optional(),
+  raw_url: z.string().nullable().optional(),
+  started_at: z.number().nullable().optional(),
+  history: z.array(SwapRunSchema).catch([]),
+  params: z
+    .object({
+      character: z.string().catch(""),
+      target: z.string().catch(""),
+      steps: z.number().catch(0),
+      sampler: z.string().catch(""),
+      scheduler: z.string().catch(""),
+      turbo: z.boolean().catch(false),
+      quality: z.string().optional(),
+      loras: z.array(z.string()).catch([]),
+      model: z.string().catch(""),
+      width: z.number().catch(0),
+      height: z.number().catch(0),
+      seed: z.number().catch(0),
+      frames_24: z.number().nullable().optional(),
+      padded_frames: z.number().nullable().optional(),
+      raw_frames: z.number().nullable().optional(),
+      lead_used: z.number().nullable().optional(),
+      method: z.string().optional(),
+      trim_frames: z.number().nullable().optional(),
+      source: z.string().catch(""),
+    })
+    .optional(),
+});
+export type SwapPass = z.infer<typeof SwapPassSchema>;
+
+export const SwapProjectSchema = z.object({
+  id: z.string(),
+  title: z.string().catch(""),
+  created_at: z.number().catch(0),
+  status: z.string().catch("draft"),
+  source: z.object({
+    path: z.string().catch(""),
+    width: z.number().catch(0),
+    height: z.number().catch(0),
+    fps: z.number().catch(24),
+    frames: z.number().catch(0),
+    duration: z.number().catch(0),
+    has_audio: z.boolean().catch(false),
+  }),
+  settings: z.object({
+    quality: z.string().catch("final"),
+    width: z.number().catch(704),
+    height: z.number().catch(1248),
+    seed: z.number().catch(904234),
+  }),
+  cast: z.array(SwapCastEntrySchema).catch([]),
+  scenes: z.array(SwapSceneSchema).catch([]),
+  scenes_confirmed: z.boolean().catch(false),
+  passes: z.array(SwapPassSchema).catch([]),
+  final: z
+    .object({ path: z.string().nullable().optional(), status: z.string().catch("none"), error: z.string().nullable().optional() })
+    .catch({ status: "none" }),
+  plan_notes: z.array(z.string()).catch([]),
+  source_url: z.string().nullable().optional(),
+  final_url: z.string().nullable().optional(),
+  size_bytes: z.number().catch(0),
+});
+export type SwapProject = z.infer<typeof SwapProjectSchema>;
+
+export const SwapCharacterSchema = z.object({
+  video_id: z.string(),
+  video_title: z.string().catch(""),
+  character_id: z.string(),
+  name: z.string().catch(""),
+  image_path: z.string(),
+  appearance: z.string().catch(""),
+  outfit: z.string().catch(""),
+});
+export type SwapCharacter = z.infer<typeof SwapCharacterSchema>;

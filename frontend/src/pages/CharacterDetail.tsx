@@ -96,6 +96,17 @@ export default function CharacterDetail() {
             <input {...register("name")} onBlur={(e) => saveFields({ name: e.target.value })} />
           </label>
           <label className="flex flex-col gap-1 text-sm">
+            Kind
+            <select
+              value={character.kind}
+              onChange={(e) => updateCharacter.mutate({ kind: e.target.value })}
+              title="Environment = a location/set (e.g. the living room) tracked as its own subject so every shot stays in the same place; not counted as a person."
+            >
+              <option value="person">Person</option>
+              <option value="environment">Environment / set</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
             Retention
             <Controller
               name="retention"
@@ -113,7 +124,7 @@ export default function CharacterDetail() {
           </label>
         </div>
         <label className="mt-3 flex flex-col gap-1 text-sm">
-          Identity description (physical traits to preserve)
+          {character.kind === "environment" ? "Environment description (layout, furniture, lighting to keep)" : "Identity description (physical traits to preserve)"}
           <textarea
             rows={2}
             placeholder="his exact facial identity, beard, hair, and build"

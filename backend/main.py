@@ -43,7 +43,8 @@ if str(WANGP_ROOT) not in sys.path:
 STAGING_DIR = Path(__file__).resolve().parent / "outputs"
 STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
-from . import animate, comfy, jobs, options, prompt, qa, store  # noqa: E402
+from . import animate, comfy, jobs, lint, options, prompt, qa, store  # noqa: E402
+from .swap import api as swap_api, progress as swap_progress, store as swap_store  # noqa: E402
 
 MEDIA_ROOT = store.VIDEOS_ROOT
 
@@ -66,6 +67,10 @@ app.mount("/media", StaticFiles(directory=str(MEDIA_ROOT)), name="media")
 store.ANIMATE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/animate-media", StaticFiles(directory=str(store.ANIMATE_OUTPUT_DIR)), name="animate-media")
 
+swap_store.ROOT.mkdir(parents=True, exist_ok=True)
+app.mount("/swap-media", StaticFiles(directory=str(swap_store.ROOT)), name="swap-media")
+app.include_router(swap_api.router)
+
 _session = None
 _job_store: jobs.JobStore | None = None
 
@@ -78,6 +83,7 @@ def _startup() -> None:
     store.migrate_reference_video_shape()
     _session = init(root=WANGP_ROOT, output_dir=STAGING_DIR, console_output=True)
     _job_store = jobs.JobStore(_session)
+    swap_api.set_job_store(_job_store, release_wangp=_session.release_model)
     comfy.manager.adopt()  # re-own a ComfyUI auto-started before a restart
 
 
@@ -158,6 +164,7 @@ def generated_image_view(image: dict[str, Any]) -> dict[str, Any]:
 def character_view(character: dict[str, Any]) -> dict[str, Any]:
     return {
         **character,
+        "kind": character.get("kind") or "person",  # characters created before `kind` existed
         "image_gen": {**prompt.DEFAULT_CHARACTER["image_gen"], **(character.get("image_gen") or {})},
         "generated_images": [generated_image_view(i) for i in character.get("generated_images") or []],
         "references": [reference_view(r) for r in character.get("references") or []],
@@ -207,7 +214,8 @@ def _calculate_total_duration(video: dict[str, Any]) -> float:
         next_clip = done_by_order.get(order + 1)
         if next_clip is not None and next_clip.get("continue_from_previous"):
             continue
-        frames = clip.get("video_length", 124)
+        # WanGP rounds an off-grid length DOWN onto H3's 17k+5 grid, so that's what the clip really is.
+        frames = lint.rendered_frames(clip.get("video_length", 124))
         total += frames / 24.0
     return round(total, 1)
 
@@ -266,6 +274,8 @@ class ClipCreate(BaseModel):
     continuation_keep_frames: Optional[int] = None
     bridge_to_next: bool = False
     active_character_ids: Optional[list[str]] = None
+    start_frame_path: Optional[str] = None  # storyboard first frame (image_start)
+    control_video_path: Optional[str] = None  # per-clip depth control video (H3 "DV")
 
 
 class ClipUpdate(BaseModel):
@@ -276,6 +286,8 @@ class ClipUpdate(BaseModel):
     continuation_keep_frames: Optional[int] = None
     bridge_to_next: Optional[bool] = None
     active_character_ids: Optional[list[str]] = None
+    start_frame_path: Optional[str] = None  # "" clears it
+    control_video_path: Optional[str] = None  # "" clears it
 
 
 class ReorderRequest(BaseModel):
@@ -283,6 +295,7 @@ class ReorderRequest(BaseModel):
 
 
 class CharacterCreate(BaseModel):
+    kind: str = "person"  # "person" | "environment" (see prompt.DEFAULT_CHARACTER)
     name: str = ""
     identity_description: str = ""
     wardrobe_notes: str = ""
@@ -290,6 +303,7 @@ class CharacterCreate(BaseModel):
 
 
 class CharacterUpdate(BaseModel):
+    kind: Optional[str] = None
     name: Optional[str] = None
     identity_description: Optional[str] = None
     wardrobe_notes: Optional[str] = None
@@ -508,6 +522,7 @@ def create_character(video_id: str, body: CharacterCreate):
             **copy.deepcopy(prompt.DEFAULT_CHARACTER),
             "id": store.new_id(),
             "order": len(video.setdefault("characters", [])),
+            "kind": body.kind if body.kind in ("person", "environment") else "person",
             "name": body.name,
             "identity_description": body.identity_description,
             "wardrobe_notes": body.wardrobe_notes,
@@ -528,6 +543,8 @@ def update_character(video_id: str, character_id: str, body: CharacterUpdate):
     def apply(data):
         video = store.find_video(data, video_id)
         character = store.find_character(video, character_id)
+        if body.kind in ("person", "environment"):
+            character["kind"] = body.kind
         if body.name is not None:
             character["name"] = body.name
         if body.identity_description is not None:
@@ -1221,6 +1238,8 @@ def create_clip(video_id: str, body: ClipCreate):
             "continue_from_previous": body.continue_from_previous,
             "continuation_keep_frames": body.continuation_keep_frames,
             "bridge_to_next": body.bridge_to_next,
+            "start_frame_path": body.start_frame_path or None,
+            "control_video_path": body.control_video_path or None,
             "active_character_ids": body.active_character_ids,
             "status": "draft",
             "job_id": None,
@@ -1254,6 +1273,14 @@ def update_clip(video_id: str, clip_id: str, body: ClipUpdate):
             clip["continuation_keep_frames"] = body.continuation_keep_frames
         if body.bridge_to_next is not None:
             clip["bridge_to_next"] = body.bridge_to_next
+        if body.start_frame_path is not None:
+            if body.start_frame_path and not Path(body.start_frame_path).is_file():
+                raise HTTPException(400, f"start frame not found: {body.start_frame_path}")
+            clip["start_frame_path"] = body.start_frame_path or None
+        if body.control_video_path is not None:
+            if body.control_video_path and not Path(body.control_video_path).is_file():
+                raise HTTPException(400, f"control video not found: {body.control_video_path}")
+            clip["control_video_path"] = body.control_video_path or None
         if "active_character_ids" in body.model_fields_set:
             clip["active_character_ids"] = body.active_character_ids
         return clip
@@ -1370,7 +1397,23 @@ def generate_clip(clip_id: str):
 
     job_id = _job_store.submit(settings, dest_path, on_done, on_queued=mark_queued, on_running=mark_running)
 
-    return {"job_id": job_id, "status": "queued"}
+    # Advisory only (never blocks): grid rounding, cut timing, wardrobe drift. See backend/lint.py.
+    return {"job_id": job_id, "status": "queued", "lint": lint.lint_clip(video, clip, previous_clip, bridge_end_frame_path)}
+
+
+@app.get("/clips/{clip_id}/lint")
+def lint_clip_endpoint(clip_id: str):
+    """Pre-flight report for a clip: what will actually render (frames/seconds after H3's frame-grid
+    rounding) and any advisory findings, without queueing anything."""
+    data = store.load()
+    try:
+        video, clip = store.find_clip_anywhere(data, clip_id)
+    except store.NotFound:
+        raise HTTPException(404, "clip not found")
+    previous_clip = None
+    if clip.get("continue_from_previous"):
+        previous_clip = next((c for c in video.get("clips") or [] if c["order"] == clip["order"] - 1), None)
+    return lint.lint_clip(video, clip, previous_clip)
 
 
 @app.post("/clips/{clip_id}/upscale")
@@ -1492,6 +1535,13 @@ def _job_targets() -> dict[str, dict[str, Any]]:
     for job in store.load_animate_jobs():
         add(job.get("job_id"), kind="animate", label=job.get("label") or "Animate job", target_id=job["id"],
             video_id=None, video_title=None, character_id=None, character_name=None)
+    for project in swap_store.load_all():
+        for p in project.get("passes") or []:
+            scene = next((s for s in project["scenes"] if s["index"] == p["scene_index"]), {})
+            person = next((x for x in scene.get("people") or [] if x["id"] == p["person_id"]), {})
+            cast = next((c for c in project["cast"] if c["id"] == person.get("cast_id")), {})
+            add(p.get("job_id"), kind="swap", label=f"Swap {project['title']} · scene {p['scene_index'] + 1} · {cast.get('name') or 'person'}",
+                target_id=p["id"], swap_id=project["id"], video_id=None, video_title=None, character_id=None, character_name=None)
     return targets
 
 
@@ -1510,8 +1560,19 @@ def list_active_jobs():
     for position, entry in enumerate(live):
         info = targets.get(entry["job_id"]) or {"kind": "unknown", "label": "Job", "target_id": None,
                                                   "video_id": None, "video_title": None, "character_id": None, "character_name": None}
-        out.append({**entry, **info, "position": position})
+        live = swap_progress.get(info["target_id"]) if info.get("kind") == "swap" and info.get("target_id") else None
+        out.append({**entry, **info, "position": position, "progress": live})
     return out
+
+
+@app.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str):
+    """Stops a queued job (drops it from the line) or asks the running one to stop (the queue indicator's ×)."""
+    if _job_store is None:
+        raise HTTPException(503, "server still starting up")
+    if not _job_store.cancel(job_id):
+        raise HTTPException(409, "that job is not running or queued, or cannot be stopped")
+    return {"ok": True}
 
 
 @app.get("/model-status")

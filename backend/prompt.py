@@ -94,6 +94,11 @@ CINEMATIC_REALISM_PRESET = (
 _UPSCALE_STATUS = {"status": "none", "job_id": None, "output_path": None, "error": None}
 
 DEFAULT_CHARACTER = {
+    # "person" (default) or "environment": a location/set tracked as its own
+    # <Subject N> ("<Subject 2> is the living-room environment in <Picture 3>,
+    # featuring ..."), per MiniMax's Ref2VA guide -- keeps every shot in the
+    # same room. Environments are left out of the people-cardinality directive.
+    "kind": "person",
     "name": "",
     "identity_description": "",
     "wardrobe_notes": "",
@@ -121,7 +126,9 @@ DEFAULT_CHARACTER = {
 # the same JobStore/session as H3, so switching models is just a model reload.
 CHARACTER_IMAGE_MODEL_TYPE = "qwen_image_21_7B"
 CHARACTER_IMAGE_MODEL_FILENAME = "https://huggingface.co/DeepBeepMeep/Qwen_image_2/resolve/main/qwen_image_21_7B_int8_convrot.safetensors"
-CHARACTER_IMAGE_ASPECTS = {"square": "1024x1024", "portrait": "896x1152", "landscape": "1152x896"}
+# "wide" (16:9) matches the H3 clip frame, for storyboard first frames; it
+# also applies to edits (the other aspects follow the edit source's size).
+CHARACTER_IMAGE_ASPECTS = {"square": "1024x1024", "portrait": "896x1152", "landscape": "1152x896", "wide": "1344x768"}
 
 # Template for one entry appended to a character's reference_videos[] list.
 # Four separate inputs, joined into one detailed_description at generation
@@ -315,14 +322,19 @@ def compose_model_tags(characters: list[dict[str, Any]]) -> list[dict[str, str]]
     return tags
 
 
-def compose_subject_definitions(characters: list[dict[str, Any]]) -> str:
+def compose_subject_definitions(characters: list[dict[str, Any]], picture_offset: int = 0) -> str:
     """Per MiniMax's own H3 prompt-writing guide, a reference that supplies
     only clothing/style (not identity) should not get a standalone callout —
     it's cited inline in the <Subject N> definition itself, e.g. "...whose
     identity comes from <Picture 1> and whose wardrobe comes from
-    <Picture 2>." That's what a reference's `note` drives below."""
+    <Picture 2>." That's what a reference's `note` drives below.
+
+    picture_offset: how many start/end anchor images WanGP puts BEFORE the
+    reference images (models/minimax_h3 handler notes: "with a start image and
+    one reference image, the start image is <Picture 1> and the reference image
+    is <Picture 2>") -- reference pictures are numbered after them."""
     lines = []
-    img_i = vid_i = aud_i = 0
+    img_i, vid_i, aud_i = picture_offset, 0, 0
     for index, character in enumerate(characters):
         subject_n = index + 1
         name = character.get("name") or f"Character {subject_n}"
@@ -337,8 +349,12 @@ def compose_subject_definitions(characters: list[dict[str, Any]]) -> str:
         noted = [(label, note) for label, note, _ in labeled if note]
         labels_str = " and ".join(identity_labels) if identity_labels else "the reference material below"
 
-        sentence = f"<Subject {subject_n}> is {name}, whose identity comes from {labels_str}"
-        sentence += f", preserving {identity}" if identity else ""
+        if character.get("kind") == "environment":
+            sentence = f"<Subject {subject_n}> is the {name} environment in {labels_str}"
+            sentence += f", featuring {identity}" if identity else ""
+        else:
+            sentence = f"<Subject {subject_n}> is {name}, whose identity comes from {labels_str}"
+            sentence += f", preserving {identity}" if identity else ""
         for label, note in noted:
             sentence += f", and whose {note} comes from {label}"
         sentence += "."
@@ -348,18 +364,18 @@ def compose_subject_definitions(characters: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def compose_retention_analysis(characters: list[dict[str, Any]]) -> str:
+def compose_retention_analysis(characters: list[dict[str, Any]], picture_offset: int = 0) -> str:
     """Uses MiniMax's own controlled vocabulary (confirmed from their H3
     prompt-writing guide): fully_preserved / partially_preserved /
     attribute_transfer / weak_reference. A noted reference (wardrobe/style
     only, not identity) is an attribute_transfer, folded into the subject's
     own line rather than given a separate weak_reference entry."""
     lines = []
-    img_i = vid_i = aud_i = 0
+    img_i, vid_i, aud_i = picture_offset, 0, 0
     for index, character in enumerate(characters):
         subject_n = index + 1
         retention = character.get("retention") or "fully_preserved"
-        identity = (character.get("identity_description") or "").strip()
+        identity = (character.get("identity_description") or "").strip().rstrip(".").rstrip()
         detail = f" - {identity}" if identity else ""
         line = f"<Subject {subject_n}> (appears throughout): {retention}{detail}."
 
@@ -382,7 +398,8 @@ def compose_cardinality_directive(characters: list[dict[str, Any]]) -> str:
     explicit, per-subject, repeated formula (matches the "Multi-Subject
     Cardinality" guidance elsewhere in this file, now made structural
     instead of something to remember to type by hand every time)."""
-    names = [character.get("name") or f"Character {i + 1}" for i, character in enumerate(characters or [])]
+    names = [character.get("name") or f"Character {i + 1}" for i, character in enumerate(characters or [])
+             if character.get("kind") != "environment"]
     if not names:
         return ""
     if len(names) == 1:
@@ -424,10 +441,44 @@ def active_characters_for_clip(video: dict[str, Any], clip: dict[str, Any]) -> l
     return [c for c in characters if c.get("id") in active_id_set]
 
 
-def build_prompt_string(base_prompt: dict[str, str], characters: list[dict[str, Any]], shot_prompt: str) -> str:
-    sections = {**DEFAULT_BASE_PROMPT, **(base_prompt or {})}
-    sections["subject_definitions"] = compose_subject_definitions(characters or [])
-    sections["retention_analysis"] = compose_retention_analysis(characters or [])
+_PICTURE_TAG_RE = re.compile(r"<Picture (\d+)>")
+
+
+def _shift_picture_tags(text: str, offset: int) -> str:
+    """User-written <Picture N> tags follow the video's model_tags numbering
+    (references only); with anchor images in front they must move up too."""
+    if not offset or not text:
+        return text
+    return _PICTURE_TAG_RE.sub(lambda m: f"<Picture {int(m.group(1)) + offset}>", text)
+
+
+CONTROL_VIDEO_DEFINITION = (
+    "<Video 1> is a grey, untextured 3D previs of [Shot 1] used as a depth guide: it defines only the camera viewpoint, "
+    "the camera movement and the placement and motion of the room's furniture and people; it provides no materials, colors or lighting."
+)
+CONTROL_VIDEO_RETENTION = (
+    "<Video 1> (camera movement and blocking structure): weak_reference - only the camera path, viewpoint, layout and motion are "
+    "followed; its grey untextured appearance is not used."
+)
+
+
+def build_prompt_string(base_prompt: dict[str, str], characters: list[dict[str, Any]], shot_prompt: str,
+                        anchors: list[str] | tuple[str, ...] = (), control_video: bool = False) -> str:
+    """anchors: timeline anchor images in WanGP's order ("first" for
+    image_start, "last" for image_end). They take <Picture 1..k>; the official
+    Ref2VA guide gives a first/last frame its own standalone line."""
+    offset = len(anchors)
+    sections = {k: _shift_picture_tags(v, offset) for k, v in {**DEFAULT_BASE_PROMPT, **(base_prompt or {})}.items()}
+    anchor_lines = [
+        f"<Picture {i}> is the {kind} frame of [Shot 1]: the shot {'opens exactly on' if kind == 'first' else 'ends exactly on'} this image, "
+        "with the same composition, layout, furniture and lighting."
+        for i, kind in enumerate(anchors, start=1)
+    ]
+    sections["subject_definitions"] = "\n".join(anchor_lines + [compose_subject_definitions(characters or [], offset)]
+                                                  + ([CONTROL_VIDEO_DEFINITION] if control_video else []))
+    sections["retention_analysis"] = "\n".join([compose_retention_analysis(characters or [], offset)]
+                                                 + ([CONTROL_VIDEO_RETENTION] if control_video else []))
+    shot_prompt = _shift_picture_tags(shot_prompt, offset)
     cardinality = compose_cardinality_directive(characters or [])
     sections["detailed_description"] = "\n".join(p for p in (CINEMATIC_REALISM_PRESET, cardinality, shot_prompt or "") if p)
     return "\n".join(f"{key}:\n{sections.get(key, '')}" for key in SECTION_ORDER)
@@ -466,6 +517,12 @@ def _finalize_settings(
     for key in ("video_guide", "video_guide2", "audio_guide", "audio_guide2"):
         if refs[key]:
             settings[key] = refs[key]
+    # WanGP's background removal strips EVERY reference image to its foreground
+    # (wgp.py resize_and_remove_background; only a "K" first image is spared),
+    # which reduced environment/set references to cut-out furniture -- the room
+    # was then re-invented per shot. Keep backgrounds when an environment is in.
+    if any(c.get("kind") == "environment" for c in characters):
+        settings["remove_background_images_ref"] = 0
     return settings
 
 
@@ -497,10 +554,36 @@ def build_generation_settings(
     visually-discontinuous dead end that also needs regenerating."""
     template = {**DEFAULT_TEMPLATE_SETTINGS, **(video.get("template_settings") or {})}
     characters = active_characters_for_clip(video, clip)
-    prompt = build_prompt_string(video.get("base_prompt") or {}, characters, clip.get("shot_prompt") or "")
+    # Storyboard first frame (image_start / "S"): the clip opens exactly on
+    # this image -- a Qwen still made as an edit of the set image, so every
+    # cut starts in the same room. WanGP orders anchors start, then end.
+    start_frame_path = (clip.get("start_frame_path") or "").strip() or None
+    anchors = [kind for kind, path in (("first", start_frame_path), ("last", bridge_end_frame_path)) if path]
+    # Per-clip depth control video (e.g. a Blender grey-box previs of THIS shot): H3's
+    # "Transfer Depth Map From Control Video" (DV) -- WanGP runs its depth estimator on
+    # it and locks layout + camera move frame by frame. The control video also sets the
+    # output size, and its length should match video_length.
+    control_video_path = (clip.get("control_video_path") or "").strip() or None
+    prompt = build_prompt_string(video.get("base_prompt") or {}, characters, clip.get("shot_prompt") or "", anchors,
+                                 control_video=bool(control_video_path))
     video_length = int(clip.get("video_length") or DEFAULT_VIDEO_LENGTH)
     output_filename = f"{video['id']}_{clip['order']:03d}_{clip['id']}"
     settings = _finalize_settings(template, characters, prompt, clip.get("seed", -1), video_length, output_filename)
+
+    if control_video_path:
+        if settings.get("video_guide"):
+            raise TooManyReferences("A per-clip control video can't be combined with character video references yet "
+                                    "(H3 takes one video guide in depth mode) -- remove the video reference or the control video.")
+        settings["video_guide"] = control_video_path
+        vpt = (settings.get("video_prompt_type") or "").replace("DV", "")
+        settings["video_prompt_type"] = vpt + "DV"
+
+    if start_frame_path:
+        image_prompt_type = settings.get("image_prompt_type", "") or ""
+        if "S" not in image_prompt_type:
+            image_prompt_type += "S"
+        settings["image_prompt_type"] = image_prompt_type
+        settings["image_start"] = [start_frame_path]
 
     if clip.get("continue_from_previous") and previous_clip and previous_clip.get("output_path"):
         image_prompt_type = settings.get("image_prompt_type", "") or ""
@@ -588,6 +671,7 @@ def build_character_image_comfy_params(video: dict[str, Any], character: dict[st
         "lora": (image_gen.get("lora") or "").strip(),
         "lora_multiplier": float(image_gen.get("lora_multiplier", 1.0)),
         "output_prefix": f"h3studio/{video['id']}_char_{character['id']}_img_{image['id']}",
+        "aspect": image.get("aspect") or "square",
     }
 
 

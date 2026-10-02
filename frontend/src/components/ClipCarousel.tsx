@@ -8,6 +8,9 @@ import ShotPromptEditor from "./ShotPromptEditor";
 import VideoPlayer from "./VideoPlayer";
 import type { Clip, ModelTag, Character } from "../schemas";
 import { jobTargetDomId, useFocusTarget } from "../lib/jobFocus";
+import StartFramePicker from "./StartFramePicker";
+import ControlVideoField from "./ControlVideoField";
+import { formatFrames } from "../lib/frames";
 
 // Solid fill + white text, same treatment as StatusBadge elsewhere in the
 // app -- a dark outline-only ring read as murky/low-contrast on the dark
@@ -19,11 +22,6 @@ const STATUS_FILL: Record<string, string> = {
   done: "bg-status-done",
   failed: "bg-status-failed",
 };
-
-function formatFrames(frames: number): string {
-  const seconds = frames / 24;
-  return `${frames}f (~${seconds.toFixed(1)}s)`;
-}
 
 // How many neighboring clips peek in on each side of the current one.
 const PEEK = 2;
@@ -162,6 +160,8 @@ function ClipFields({
         Bridge to next clip (steer this regeneration to land back on the next clip's existing first frame, so the
         rest of the chain doesn't need to be redone)
       </label>
+      <StartFramePicker clip={clip} characters={characters} onChange={(path) => onUpdate(clip.id, { start_frame_path: path })} />
+      <ControlVideoField clip={clip} onChange={(path) => onUpdate(clip.id, { control_video_path: path })} />
 
       {characters.length > 1 && (
         <fieldset className="flex flex-col gap-1 text-sm">

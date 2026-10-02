@@ -104,6 +104,9 @@ export default function VideosList() {
           <Link to="/animate-jobs">
             <button>Animate jobs</button>
           </Link>
+          <Link to="/swaps">
+            <button>Character swap</button>
+          </Link>
           <Link to="/prompt-tags">
             <button>Prompt tags</button>
           </Link>

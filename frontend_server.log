@@ -1,0 +1,20 @@
+
+> frontend@0.0.0 dev
+> vite
+
+
+  VITE v8.3.0  ready in 2807 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: http://192.168.56.1:5173/    Ethernet 3
+  ➜  Network: http://192.168.100.16:5173/  WiFi 2
+  ➜  press h + enter to show help
+4:25:45 p.m. [vite] (client) hmr update /src/index.css, /src/pages/VideosList.tsx, /src/pages/CharacterDetail.tsx, /src/pages/AnimateJobs.tsx, /src/pages/CharactersList.tsx, /src/pages/VideoDetail.tsx, /src/pages/PromptTagsList.tsx, /src/components/QueueIndicator.tsx, /src/components/TopNav.tsx, /src/components/ShotPromptEditor.tsx, /src/components/CharacterImageStudio.tsx, /src/components/PromptTagEditor.tsx, /src/components/ReferenceThumb.tsx, /src/components/ClipCarousel.tsx
+4:25:45 p.m. [vite] (client) hmr update /src/pages/CharacterDetail.tsx, /src/index.css
+5:25:35 p.m. [vite] (client) hmr update /src/index.css, /src/pages/VideosList.tsx, /src/pages/CharacterDetail.tsx, /src/pages/AnimateJobs.tsx, /src/pages/CharactersList.tsx, /src/pages/VideoDetail.tsx, /src/pages/PromptTagsList.tsx, /src/components/QueueIndicator.tsx, /src/components/TopNav.tsx, /src/components/ShotPromptEditor.tsx, /src/components/CharacterImageStudio.tsx, /src/components/PromptTagEditor.tsx, /src/components/ReferenceThumb.tsx, /src/components/ClipCarousel.tsx
+5:25:35 p.m. [vite] (client) hmr update /src/index.css, /src/components/ClipCarousel.tsx
+5:25:35 p.m. [vite] (client) hmr update /src/pages/VideoDetail.tsx, /src/index.css
+5:26:17 p.m. [vite] (client) hmr update /src/index.css, /src/components/CharacterImageStudio.tsx
+7:17:51 p.m. [vite] (client) hmr update /src/index.css, /src/pages/VideosList.tsx, /src/pages/CharacterDetail.tsx, /src/pages/AnimateJobs.tsx, /src/pages/CharactersList.tsx, /src/pages/VideoDetail.tsx, /src/pages/PromptTagsList.tsx, /src/components/QueueIndicator.tsx, /src/components/TopNav.tsx, /src/components/ShotPromptEditor.tsx, /src/components/CharacterImageStudio.tsx, /src/components/PromptTagEditor.tsx, /src/components/ReferenceThumb.tsx, /src/components/ClipCarousel.tsx, /src/components/StartFramePicker.tsx
+7:17:51 p.m. [vite] (client) hmr update /src/pages/VideoDetail.tsx, /src/index.css
+7:17:51 p.m. [vite] (client) hmr update /src/index.css, /src/components/ClipCarousel.tsx

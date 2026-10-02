@@ -17,6 +17,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 
+CANCELLED = "Cancelled by user"
+
+
 class _JobRecord:
     def __init__(self, job_id: str, job: Any, dest_path: Path, on_done: Callable[..., None]) -> None:
         self.job_id = job_id
@@ -67,8 +70,10 @@ class _CallableRecord:
     produced file's path. Shares the JobStore's single slot with WanGP jobs so
     two generations never fight over the GPU."""
 
-    def __init__(self, job_id: str, runner: Callable[[Path], Path], dest_path: Path, on_done: Callable[..., None]) -> None:
+    def __init__(self, job_id: str, runner: Callable[[Path], Path], dest_path: Path, on_done: Callable[..., None],
+                 on_cancel: Callable[[], None] | None = None) -> None:
         self.job_id = job_id
+        self.on_cancel = on_cancel
         self.runner = runner
         self.dest_path = dest_path
         self.on_done = on_done
@@ -95,8 +100,9 @@ class _CallableRecord:
 
 class _PendingItem:
     def __init__(self, job_id: str, settings: dict[str, Any] | None, dest_path: Path, on_done: Callable[..., None], on_running: Callable[[], None] | None,
-                 runner: Callable[[Path], Path] | None = None) -> None:
+                 runner: Callable[[Path], Path] | None = None, on_cancel: Callable[[], None] | None = None) -> None:
         self.job_id = job_id
+        self.on_cancel = on_cancel
         self.settings = settings
         self.runner = runner
         self.dest_path = dest_path
@@ -158,11 +164,13 @@ class JobStore:
         on_done: Callable[..., None],
         on_queued: Callable[[str], None] | None = None,
         on_running: Callable[[], None] | None = None,
+        on_cancel: Callable[[], None] | None = None,
     ) -> str:
         """Like submit(), for work done outside WanGP: runner(dest_path) runs
-        in the same FIFO slot and returns the produced file's path."""
+        in the same FIFO slot and returns the produced file's path. on_cancel
+        (optional) is what to call to stop it while it is running."""
         job_id = uuid.uuid4().hex
-        item = _PendingItem(job_id, None, dest_path, on_done, on_running, runner=runner)
+        item = _PendingItem(job_id, None, dest_path, on_done, on_running, runner=runner, on_cancel=on_cancel)
         with self._lock:
             self._pending.append(item)
             if on_queued is not None:
@@ -176,7 +184,7 @@ class JobStore:
             return
         item = self._pending.popleft()
         if item.runner is not None:
-            record: _JobRecord | _CallableRecord = _CallableRecord(item.job_id, item.runner, item.dest_path, self._on_item_done(item))
+            record: _JobRecord | _CallableRecord = _CallableRecord(item.job_id, item.runner, item.dest_path, self._on_item_done(item), item.on_cancel)
         else:
             job = self._session.submit_task(item.settings)
             record = _JobRecord(item.job_id, job, item.dest_path, self._on_item_done(item))
@@ -194,6 +202,32 @@ class JobStore:
                 self._maybe_start_next()
 
         return _wrapped
+
+    def cancel(self, job_id: str) -> bool:
+        """Stops a queued job (removed from the line, reported as failed/CANCELLED) or asks the running one to
+        stop. Returns False when the job is unknown, already finished, or cannot be stopped while running."""
+        with self._lock:
+            for item in list(self._pending):
+                if item.job_id == job_id:
+                    self._pending.remove(item)
+                    pending = item
+                    break
+            else:
+                pending = None
+            record = self._jobs.get(job_id) if pending is None else None
+            running = record is not None and job_id == self._active_job_id and not record.is_done()
+        if pending is not None:
+            pending.on_done(status="failed", output_path=None, error=CANCELLED, duration_seconds=0)
+            return True
+        if not running:
+            return False
+        if isinstance(record, _JobRecord):
+            record.job.cancel()
+            return True
+        if record.on_cancel is None:
+            return False
+        record.on_cancel()
+        return True
 
     def snapshot(self) -> list[dict[str, Any]]:
         """Live queue in execution order: the running job (if any) first,

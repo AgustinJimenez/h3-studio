@@ -25,7 +25,7 @@ import {
 // Derived from wherever this page was loaded from, so the same build works
 // both on localhost and when opened from another device on the LAN (the
 // backend always listens on the same port, just reached via a different host).
-const API_BASE = `http://${window.location.hostname}:8787`;
+export const API_BASE = `http://${window.location.hostname}:8787`;
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -81,6 +81,9 @@ export const api = {
   unloadModel: () => request<{ ok: boolean }>("/unload-model", { method: "POST" }),
   getCharacterImageProviders: async (): Promise<ImageProvider[]> =>
     ImageProviderSchema.array().parse(((await request("/character-images/options")) as { providers: unknown }).providers),
+  cancelJob: async (jobId: string): Promise<void> => {
+    await request(`/jobs/${jobId}/cancel`, { method: "POST" });
+  },
   listActiveJobs: async (): Promise<ActiveJob[]> => ActiveJobSchema.array().parse(await request("/jobs/active")),
   getModelStatus: async (): Promise<ModelStatus> => ModelStatusSchema.parse(await request("/model-status")),
   loadModel: (modelType: string) =>

@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, X } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { api } from "../lib/api";
+import JobProgress from "./JobProgress";
 import { useActiveJobs } from "../lib/queries";
 import { requestFocus } from "../lib/jobFocus";
 import type { ActiveJob } from "../schemas";
@@ -24,6 +28,23 @@ export default function QueueIndicator() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const qc = useQueryClient();
+  const [cancelling, setCancelling] = useState<string | null>(null);
+
+  async function cancel(job: ActiveJob) {
+    setCancelling(job.job_id);
+    try {
+      await api.cancelJob(job.job_id);
+      toast.success(job.status === "running" ? "Stopping…" : "Removed from the queue");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setCancelling(null);
+      qc.invalidateQueries({ queryKey: ["activeJobs"] });
+      qc.invalidateQueries({ queryKey: ["swaps"] });
+      qc.invalidateQueries({ queryKey: ["swap"] });
+    }
+  }
 
   useEffect(() => {
     if (jobs.length === 0) return;
@@ -39,6 +60,8 @@ export default function QueueIndicator() {
   async function go(job: ActiveJob) {
     if (job.kind === "animate") {
       await navigate({ to: "/animate-jobs" });
+    } else if (job.kind === "swap" && job.swap_id) {
+      await navigate({ to: "/swaps/$id", params: { id: job.swap_id } });
     } else if (job.character_id && job.video_id) {
       await navigate({ to: "/videos/$id/characters/$characterId", params: { id: job.video_id, characterId: job.character_id } });
     } else if (job.video_id) {
@@ -58,10 +81,10 @@ export default function QueueIndicator() {
       {open && (
         <ul className="max-h-80 overflow-y-auto border-b border-border py-1">
           {jobs.map((job) => (
-            <li key={job.job_id}>
+            <li key={job.job_id} className="flex items-stretch">
               <button
                 onClick={() => go(job)}
-                className="flex w-full items-start gap-2 rounded-none border-0 bg-transparent px-3 py-2 text-left hover:bg-bg"
+                className="flex min-w-0 flex-1 items-start gap-2 rounded-none border-0 bg-transparent px-3 py-2 text-left hover:bg-bg"
                 title="Go to this item"
               >
                 {job.status === "running" ? (
@@ -69,13 +92,23 @@ export default function QueueIndicator() {
                 ) : (
                   <span className="mt-0.5 w-3.5 shrink-0 text-center text-xs opacity-60">{job.position}</span>
                 )}
-                <span className="flex min-w-0 flex-col">
+                <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-sm">{job.label}</span>
                   {where(job) && <span className="truncate text-xs opacity-65">{where(job)}</span>}
+                  {job.status === "running" && <JobProgress progress={job.progress} />}
                 </span>
                 <span className="ml-auto shrink-0 text-xs opacity-75">
                   {job.status === "running" ? elapsed(job.started_at, now) : "queued"}
                 </span>
+              </button>
+              <button
+                className="shrink-0 rounded-none border-0 bg-transparent px-2.5 text-text-muted hover:bg-bg hover:text-danger"
+                title={job.status === "running" ? "Stop this generation" : "Remove from the queue"}
+                aria-label={job.status === "running" ? "Stop this generation" : "Remove from the queue"}
+                disabled={cancelling === job.job_id}
+                onClick={() => cancel(job)}
+              >
+                <X size={14} />
               </button>
             </li>
           ))}

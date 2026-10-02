@@ -28,14 +28,11 @@ import ClipCarousel from "../components/ClipCarousel";
 import VideoPlayer from "../components/VideoPlayer";
 import type { Clip, BasePrompt, ModelTag, QaReport, Character } from "../schemas";
 import { jobTargetDomId, useFocusTarget } from "../lib/jobFocus";
+import StartFramePicker from "../components/StartFramePicker";
+import ControlVideoField from "../components/ControlVideoField";
+import { formatFrames, formatTotalFrames, renderedFrames } from "../lib/frames";
 
 const ACTIVE_STATUSES = new Set(["queued", "running"]);
-const FPS = 24; // H3's frame rate — see prompt.py's DEFAULT_VIDEO_LENGTH comment.
-
-function formatFrames(frames: number): string {
-  const seconds = frames / FPS;
-  return `${frames}f (~${seconds.toFixed(1)}s)`;
-}
 
 const BASE_PROMPT_FIELDS: [keyof BasePrompt, string][] = [
   ["summary", "Summary"],
@@ -109,7 +106,7 @@ export default function VideoDetail() {
   // Each clip's video_length is its OWN new frame count, not a running total (continuation clips'
   // *output files* grow cumulatively, but the setting itself stays per-clip) — so the timeline total
   // is the sum across done clips, not the last clip's value alone.
-  const doneFramesSoFar = sortedClips.filter((c) => c.status === "done").reduce((sum, c) => sum + c.video_length, 0);
+  const doneFramesSoFar = sortedClips.filter((c) => c.status === "done").reduce((sum, c) => sum + renderedFrames(c.video_length), 0);
 
   // Progressive disclosure: each section only appears once the one before it
   // is actually filled in, so a new project reads as a to-do list instead of
@@ -401,7 +398,7 @@ export default function VideoDetail() {
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-xl font-bold">
           Clips ({sortedClips.length}
-          {doneFramesSoFar > 0 && `, ${formatFrames(doneFramesSoFar)} generated so far`})
+          {doneFramesSoFar > 0 && `, ${formatTotalFrames(doneFramesSoFar)} generated so far`})
         </h2>
         <div className="flex gap-2">
           <div className="flex overflow-hidden rounded-md border border-border">
@@ -706,6 +703,8 @@ function ClipRow({
             Bridge to next clip (steer this regeneration to land back on the next clip's existing first frame, so
             the rest of the chain doesn't need to be redone)
           </label>
+          <StartFramePicker clip={clip} characters={characters} onChange={(path) => onUpdate({ start_frame_path: path })} />
+      <ControlVideoField clip={clip} onChange={(path) => onUpdate({ control_video_path: path })} />
           {characters.length > 1 && (
             <fieldset className="flex flex-col gap-1 text-sm">
               <legend className="opacity-75">

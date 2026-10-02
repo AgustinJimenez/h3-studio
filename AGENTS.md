@@ -237,3 +237,20 @@ A small local app for building multi-clip H3 sequences without hand-editing sett
   - **The queue has no cancel.** Restarting the backend drops queued and running jobs, and their stored status stays "queued"/"running" until regenerated.
   - `jobs.py` was already racy in the same way before (the record is marked done just before `on_done` clears the active slot); `_CallableRecord` mirrors it.
   - The Vitest suites currently fail to load (`@testing-library/dom` missing). This predates this work; `tsc -b` is the check used.
+
+## Environments, start frames, control video, frame-grid lint (built 2026-09-24/25)
+
+- **Character `kind: "environment"`** (a room/set as its own `<Subject N>`, excluded from the people-cardinality directive). WanGP's background removal strips EVERY reference image, so `_finalize_settings` sets `remove_background_images_ref: 0` whenever an environment is present. A populated reference (person already in the frame) fights the prompt's starting pose; an empty photoreal room is better.
+- **Per-clip `start_frame_path`** (WanGP `image_start`, `image_prompt_type` "S"): the clip opens exactly on the image, so any artifact in it is inherited; anchors take `<Picture 1..k>` first and references are renumbered after them. **Per-clip `control_video_path`** (depth guide, "DV") sets the output size; the control clip must be <= 15.0 s (<= 345 frames).
+- **`backend/lint.py` + `GET /clips/{id}/lint`** (also returned by the generate call; advisory only, never blocks): G1-G3 frame-grid/length (WanGP rounds an off-grid `video_length` DOWN: 145 -> 141), T1-T3 in-clip cut timing (`[Shot N] At MM:SS.mmm`, >= 1.2 s per shot, inside the clip), W1 outfit not restated in every shot of a multi-shot clip, C1/C2 canvas (multiple of 32, <= 768x1344). The UI shows "145f -> renders 141f" (`frontend/src/lib/frames.ts`) and the timeline total uses rendered frames. Tests: `python -m backend.tests.test_lint` (the frontend vitest suite does not run in this checkout: missing `@testing-library/dom`).
+- Reference `video_length` defaults of 174 (reference-video form, `prompt.py`, `schemas.ts:39`, `CharacterDetail.tsx`) are off-grid (render 158): known, not yet changed.
+- In-clip cuts work for consistency, but H3 only approximates the timestamps (about +-2 s) and may add a cut of its own; the lint can check legality, not obedience.
+
+## Swap (character swap on an existing video)
+
+- UI: `/swaps` (list) and `/swaps/$id` (source → cast → scenes → run → results). Backend: `backend/swap/` (`scenes, prompts, graph, runner, assemble, store, api`), data in `backend/data/swaps/<slug>-<id8>/`.
+- Flow: upload → detect scenes → cast (name, appearance, fixed outfit) → per scene: background text + who is replaced → Build plan → Run (Preview = turbo 4 steps, chunks ≤124 frames; Final = 20 steps, ≤243) → Assemble (original audio).
+- Switching quality on Run re-chunks and re-plans from scratch (preview outputs are replaced).
+- Assembly normalises every clip to the source size first: joining 704x1248 swapped clips with 720x1280 originals straight through dropped frames (found by the live smoke test, regression test in `test_swap_assemble.py`).
+- Tests: `python -m backend.tests.test_swap_<scenes|prompts|graph|assemble|runner|store|api>` in the WanGP venv. Wording rules live in `backend/swap/prompts.py` (see wan2.1gp AGENTS.md "Character swap").
+- Live smoke (2026-09-30): ObNx9fajfpcURSGN.mp4 → 7 scenes as expected, scene 4 preview swap 204 s, final 580 frames with audio.

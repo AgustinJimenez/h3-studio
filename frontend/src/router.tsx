@@ -7,6 +7,8 @@ import CharactersList from "./pages/CharactersList";
 import CharacterDetail from "./pages/CharacterDetail";
 import PromptTagsList from "./pages/PromptTagsList";
 import AnimateJobs from "./pages/AnimateJobs";
+import SwapsList from "./pages/SwapsList";
+import SwapDetail from "./pages/SwapDetail";
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -54,7 +56,28 @@ const animateJobsRoute = createRoute({
   component: AnimateJobs,
 });
 
-const routeTree = rootRoute.addChildren([videosListRoute, videoDetailRoute, charactersListRoute, characterDetailRoute, promptTagsListRoute, animateJobsRoute]);
+const swapsListRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/swaps",
+  component: SwapsList,
+});
+
+const swapDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/swaps/$id",
+  component: SwapDetail,
+});
+
+const routeTree = rootRoute.addChildren([
+  videosListRoute,
+  videoDetailRoute,
+  charactersListRoute,
+  characterDetailRoute,
+  promptTagsListRoute,
+  animateJobsRoute,
+  swapsListRoute,
+  swapDetailRoute,
+]);
 
 export const router = createRouter({ routeTree });
 
