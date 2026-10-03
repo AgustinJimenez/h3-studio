@@ -48,6 +48,15 @@ def build_control_clip(src: str, start_src: int, end_src: int, fps_src: float, w
     return {"source_frames": end_src - start_src + 1, "frames_24": n, "frames": scenes.count_frames(str(dest)), "stretched": True}
 
 
+def context_tail(src: str, dest: str, keep: int) -> int:
+    """Writes the LAST `keep` frames of `src` to `dest` (all of it when it is shorter) and returns how many it holds.
+    A continuation clip must start from where the previous one ends: WanGP's own `keep_frames_video_source` keeps the FIRST frames."""
+    total = scenes.count_frames(str(src))
+    n = min(int(keep), total)
+    scenes.cut_frames(str(src), str(dest), total - n, n)
+    return n
+
+
 def video_info(path: str | None) -> dict[str, Any] | None:
     """Frame count, size and fps of a video file, or None when it is missing or unreadable."""
     if not path or not Path(path).exists():

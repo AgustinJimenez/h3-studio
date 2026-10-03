@@ -1350,6 +1350,13 @@ def generate_clip(clip_id: str):
         previous_clip = next((c for c in video.get("clips") or [] if c["order"] == clip["order"] - 1), None)
         if previous_clip is None or previous_clip.get("status") != "done" or not previous_clip.get("output_path"):
             raise HTTPException(400, "continue_from_previous is set but the preceding clip has no completed output to continue from")
+        keep = clip.get("continuation_keep_frames")
+        if keep:
+            # WanGP keeps the FIRST frames of the source video, so hand it only the previous clip's last `keep` frames.
+            tail = store.clips_dir(video["folder"]) / f"{clip_id}_context.mp4"
+            tail.parent.mkdir(parents=True, exist_ok=True)
+            control.context_tail(previous_clip["output_path"], str(tail), int(keep))
+            previous_clip = {**previous_clip, "output_path": str(tail)}
 
     bridge_end_frame_path = None
     if clip.get("bridge_to_next"):

@@ -77,6 +77,17 @@ def test_a_target_length_fits_the_clip_exactly_in_either_direction():
         assert same["frames"] == 124 and same["stretched"] is False
 
 
+def test_the_context_tail_is_the_last_frames_of_the_previous_clip():
+    with tempfile.TemporaryDirectory() as t:
+        d = Path(t)
+        src = _halves(d / "prev.mp4", 60)  # frames 0-29 white, 30-59 black
+        control.context_tail(src, str(d / "ctx.mp4"), 22)
+        assert scenes.count_frames(str(d / "ctx.mp4")) == 22
+        assert _mean_luma(str(d / "ctx.mp4")) < 40  # the end of the clip, not its start
+        short = control.context_tail(src, str(d / "all.mp4"), 500)  # more than the clip has: the whole clip
+        assert short == 60 and scenes.count_frames(str(d / "all.mp4")) == 60
+
+
 def test_video_info_of_a_missing_file_is_none():
     assert control.video_info("nope.mp4") is None
 
