@@ -1699,19 +1699,13 @@ def _compute_own_segment_path(video: dict[str, Any], clip: dict[str, Any], outpu
     previous_clip = next((c for c in video.get("clips") or [] if c["order"] == clip["order"] - 1), None)
     if not previous_clip or not previous_clip.get("output_path"):
         return None
-    start = _get_video_duration_seconds(previous_clip["output_path"])
-    if start <= 0:
+    previous_seconds = _get_video_duration_seconds(previous_clip["output_path"])
+    if previous_seconds <= 0:
         return None
+    # With context frames the output holds only those (not the whole previous clip) before the new part.
+    start = control.lead_in_seconds(clip.get("continuation_keep_frames"), previous_seconds)
     dest = store.clips_dir(video["folder"]) / f"{clip['id']}_own_segment.mp4"
-    import imageio_ffmpeg
-    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-    result = subprocess.run(
-        [ffmpeg_exe, "-y", "-ss", str(start), "-i", str(output_path), "-c", "copy", str(dest)],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0 or not dest.exists():
-        return None
-    return str(dest)
+    return str(dest) if control.own_segment(str(output_path), str(dest), start) else None
 
 
 @app.get("/videos/{video_id}/clips/{clip_id}")
@@ -1731,22 +1725,8 @@ def _run_concat(video_id: str) -> dict[str, Any]:
     data = store.load()
     video = store.find_video(data, video_id)
 
-    done_by_order = {
-        c["order"]: c
-        for c in video["clips"]
-        if c["status"] == "done" and c.get("output_path")
-    }
-    if not done_by_order:
-        return {"concat_output_path": None, "concat_output_url": None}
-
-    segment_clips = []
-    for order, clip in sorted(done_by_order.items()):
-        next_clip = done_by_order.get(order + 1)
-        if next_clip is not None and next_clip.get("continue_from_previous"):
-            continue
-        segment_clips.append(clip)
-
-    if not segment_clips:
+    segment_paths, mixed = control.segments_to_join(video["clips"])
+    if not segment_paths:
         return {"concat_output_path": None, "concat_output_url": None}
 
     video_folder = store.video_dir(video["folder"])
@@ -1754,18 +1734,20 @@ def _run_concat(video_id: str) -> dict[str, Any]:
 
     # If there is only one continuous master sequence, copy it directly
     # preserving 100% of WanGP's native frame-by-frame temporal perfection without any splice artifacts.
-    if len(segment_clips) == 1:
+    if len(segment_paths) == 1:
         import shutil
-        shutil.copy2(segment_clips[0]["output_path"], out_path)
+        shutil.copy2(segment_paths[0], out_path)
     else:
         list_path = video_folder / "concat_list.txt"
         list_path.write_text(
-            "\n".join(f"file '{Path(c['output_path']).resolve().as_posix()}'" for c in segment_clips),
+            "\n".join(f"file '{Path(p).resolve().as_posix()}'" for p in segment_paths),
             encoding="utf-8",
         )
         import imageio_ffmpeg
         ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-        cmd = [ffmpeg_exe, "-y", "-f", "concat", "-safe", "0", "-i", str(list_path), "-c", "copy", str(out_path)]
+        # A trimmed part was re-encoded by us, so the pieces differ in stream details: re-encode the join too.
+        codec = ["-c:v", "libx264", "-crf", "14", "-pix_fmt", "yuv420p", "-c:a", "aac"] if mixed else ["-c", "copy"]
+        cmd = [ffmpeg_exe, "-y", "-f", "concat", "-safe", "0", "-i", str(list_path), *codec, str(out_path)]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"ffmpeg concat failed: {result.stderr[-2000:]}")

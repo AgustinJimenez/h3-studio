@@ -88,6 +88,48 @@ def test_the_context_tail_is_the_last_frames_of_the_previous_clip():
         assert short == 60 and scenes.count_frames(str(d / "all.mp4")) == 60
 
 
+def test_the_lead_in_is_the_context_frames_when_set_and_the_whole_previous_clip_otherwise():
+    assert control.lead_in_seconds(5, 5.17) == 5 / 24  # a continuation that was given the previous clip's last 5 frames
+    assert control.lead_in_seconds(None, 5.17) == 5.17  # a continuation of the whole previous clip
+    assert control.lead_in_seconds(0, 5.17) == 5.17
+
+
+def test_the_own_segment_drops_exactly_the_lead_in_frames():
+    with tempfile.TemporaryDirectory() as t:
+        d = Path(t)
+        src = _halves(d / "cont.mp4", 60)  # 24 fps: frames 0-29 white, 30-59 black
+        assert control.own_segment(src, str(d / "own.mp4"), 30 / 24) is True
+        assert scenes.count_frames(str(d / "own.mp4")) == 30
+        assert _mean_luma(str(d / "own.mp4")) < 40  # only the part after the lead-in
+
+
+def _clip(order, **kw):
+    return {"order": order, "status": "done", "output_path": f"clip{order}.mp4", "continue_from_previous": False, "continuation_keep_frames": None,
+            "own_segment_path": None, **kw}
+
+
+def test_clips_with_no_continuation_are_all_joined():
+    paths, mixed = control.segments_to_join([_clip(0), _clip(1), _clip(2)])
+    assert paths == ["clip0.mp4", "clip1.mp4", "clip2.mp4"] and mixed is False
+
+
+def test_a_whole_clip_continuation_already_contains_the_clip_before_it():
+    clips = [_clip(0), _clip(1), _clip(2, continue_from_previous=True)]
+    paths, mixed = control.segments_to_join(clips)
+    assert paths == ["clip0.mp4", "clip2.mp4"] and mixed is False  # clip 2's file holds clip 1 as its lead-in
+
+
+def test_a_continuation_with_context_frames_adds_only_its_own_part_and_keeps_the_clip_before():
+    clips = [_clip(0), _clip(1), _clip(2, continue_from_previous=True, continuation_keep_frames=5, own_segment_path="own2.mp4")]
+    paths, mixed = control.segments_to_join(clips)
+    assert paths == ["clip0.mp4", "clip1.mp4", "own2.mp4"] and mixed is True
+
+
+def test_clips_that_are_not_done_are_left_out():
+    paths, _ = control.segments_to_join([_clip(0), _clip(1, status="failed"), _clip(2)])
+    assert paths == ["clip0.mp4", "clip2.mp4"]
+
+
 def test_video_info_of_a_missing_file_is_none():
     assert control.video_info("nope.mp4") is None
 

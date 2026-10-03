@@ -57,6 +57,39 @@ def context_tail(src: str, dest: str, keep: int) -> int:
     return n
 
 
+def lead_in_seconds(keep_frames: int | None, previous_seconds: float, fps: int = FPS) -> float:
+    """How much of a continuation clip is inherited from the previous clip: the context frames it was given, or all of the
+    previous clip when it was continued whole."""
+    return keep_frames / fps if keep_frames else previous_seconds
+
+
+def own_segment(src: str, dest: str, start_seconds: float) -> bool:
+    """Writes the part of `src` after the first `start_seconds` (re-encoded, so the cut is frame accurate)."""
+    r = subprocess.run([scenes.ffmpeg_exe(), "-v", "error", "-y", "-ss", f"{start_seconds:.4f}", "-i", str(src), "-c:v", "libx264", "-crf", "14",
+                        "-pix_fmt", "yuv420p", "-c:a", "aac", str(dest)], capture_output=True, text=True)
+    return r.returncode == 0 and Path(dest).exists()
+
+
+def segments_to_join(clips: list[dict[str, Any]]) -> tuple[list[str], bool]:
+    """The files that make the whole video, in order, and whether any of them is a trimmed part (so the join must re-encode).
+    A continuation of the WHOLE previous clip already contains that clip, so the clip before it is skipped; one given only
+    context frames holds just those, so the clip before it stays and only the new part (its own segment) is added."""
+    done = {c["order"]: c for c in clips if c.get("status") == "done" and c.get("output_path")}
+    paths: list[str] = []
+    mixed = False
+    for order in sorted(done):
+        clip = done[order]
+        nxt = done.get(order + 1)
+        if nxt and nxt.get("continue_from_previous") and not nxt.get("continuation_keep_frames"):
+            continue
+        if clip.get("continue_from_previous") and clip.get("continuation_keep_frames") and clip.get("own_segment_path"):
+            paths.append(clip["own_segment_path"])
+            mixed = True
+        else:
+            paths.append(clip["output_path"])
+    return paths, mixed
+
+
 def video_info(path: str | None) -> dict[str, Any] | None:
     """Frame count, size and fps of a video file, or None when it is missing or unreadable."""
     if not path or not Path(path).exists():
