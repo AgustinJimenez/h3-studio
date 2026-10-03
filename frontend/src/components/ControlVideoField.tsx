@@ -11,10 +11,13 @@ import type { Clip } from "../schemas";
 export default function ControlVideoField({
   clip,
   onChange,
+  onEnabledChange,
 }: {
   clip: Clip;
   onChange: (path: string) => void;
+  onEnabledChange?: (enabled: boolean) => void;
 }) {
+  const enabled = clip.control_video_enabled !== false;
   const [draft, setDraft] = useState(clip.control_video_path ?? "");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -57,8 +60,29 @@ export default function ControlVideoField({
           output size.
         </span>
       </div>
+      {clip.control_video_path && onEnabledChange && (
+        <label
+          className="flex items-center gap-2"
+          title="Off: the clip keeps this control video attached but is generated without it"
+        >
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => onEnabledChange(e.target.checked)}
+          />
+          Use it for this clip
+          {!enabled && (
+            <span className="text-xs text-amber-400">
+              off: generated without it, so the camera and layout come from the
+              prompt and the output size from the template resolution
+            </span>
+          )}
+        </label>
+      )}
       {url ? (
-        <div className="flex flex-wrap items-start gap-3">
+        <div
+          className={`flex flex-wrap items-start gap-3 ${enabled ? "" : "opacity-50"}`}
+        >
           <div className="w-44 shrink-0">
             <VideoPlayer
               src={url}

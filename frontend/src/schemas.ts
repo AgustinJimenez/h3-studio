@@ -121,6 +121,7 @@ export const ClipSchema = z.object({
   start_frame_path: z.string().nullable().optional(),
   control_video_path: z.string().nullable().optional(),
   control_video_url: z.string().nullable().optional(),
+  control_video_enabled: z.boolean().nullable().optional(), // false: attached but left out of the generation
   control_video_info: z.object({ frames: z.number(), width: z.number(), height: z.number(), fps: z.number() }).nullable().optional(),
   active_character_ids: z.array(z.string()).nullable().optional(),
   status: StatusSchema.catch("draft"),

@@ -52,13 +52,23 @@ function ClipVideoBlock({
   const previewUrl =
     previewFull || !hasOwnSegment ? clip.output_url : clip.own_segment_url;
   // The player takes the clip's own shape (from its render size) so a portrait clip is not letterboxed inside a 16:9 box.
-  const size = /^(\d+)x(\d+)$/.exec(String(clip.last_generation_settings?.resolution ?? ""));
+  const size = /^(\d+)x(\d+)$/.exec(
+    String(clip.last_generation_settings?.resolution ?? ""),
+  );
   const ratio = size ? Number(size[1]) / Number(size[2]) : 16 / 9;
-  const box = { aspectRatio: ratio, height: `min(74vh, ${28 / ratio}rem)`, width: "auto", maxWidth: "100%" } as const;
+  const box = {
+    aspectRatio: ratio,
+    height: `min(74vh, ${28 / ratio}rem)`,
+    width: "auto",
+    maxWidth: "100%",
+  } as const;
 
   if (!previewUrl) {
     return (
-      <div style={box} className="mx-auto flex items-center justify-center rounded border border-dashed border-border text-sm opacity-60">
+      <div
+        style={box}
+        className="mx-auto flex items-center justify-center rounded border border-dashed border-border text-sm opacity-60"
+      >
         {clip.status === "running" || clip.status === "queued"
           ? "Generating…"
           : "Not generated yet"}
@@ -176,7 +186,7 @@ function ClipSetup({
     clip.bridge_to_next && "bridges to the next clip",
     clip.start_frame_path && "first frame set",
     clip.control_video_path &&
-      `control video${info ? ` · ${info.frames} frames` : ""}`,
+      `control video${info ? ` · ${info.frames} frames` : ""}${clip.control_video_enabled === false ? " (off)" : ""}`,
     characters.length > 0 && `characters: ${activeNames.join(", ") || "none"}`,
   ].filter(Boolean) as string[];
 
@@ -298,6 +308,9 @@ function ClipSetup({
         <ControlVideoField
           clip={clip}
           onChange={(path) => onUpdate(clip.id, { control_video_path: path })}
+          onEnabledChange={(enabled) =>
+            onUpdate(clip.id, { control_video_enabled: enabled })
+          }
         />
       </div>
     </details>
@@ -508,7 +521,10 @@ export default function ClipCarousel({
   };
 
   return (
-    <div id={jobTargetDomId(clip.id)} className="relative left-1/2 flex w-[min(94vw,80rem)] -translate-x-1/2 flex-col gap-3">
+    <div
+      id={jobTargetDomId(clip.id)}
+      className="relative left-1/2 flex w-[min(94vw,80rem)] -translate-x-1/2 flex-col gap-3"
+    >
       <div className="flex items-center justify-center gap-2">
         <button
           className="border-0 bg-transparent p-1 disabled:opacity-30"

@@ -563,7 +563,10 @@ def build_generation_settings(
     # "Transfer Depth Map From Control Video" (DV) -- WanGP runs its depth estimator on
     # it and locks layout + camera move frame by frame. The control video also sets the
     # output size, and its length should match video_length.
+    # control_video_enabled (default on) lets a clip keep its control video attached but generate without it.
     control_video_path = (clip.get("control_video_path") or "").strip() or None
+    if not clip.get("control_video_enabled", True):
+        control_video_path = None
     prompt = build_prompt_string(video.get("base_prompt") or {}, characters, clip.get("shot_prompt") or "", anchors,
                                  control_video=bool(control_video_path))
     video_length = int(clip.get("video_length") or DEFAULT_VIDEO_LENGTH)

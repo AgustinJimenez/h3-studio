@@ -704,7 +704,7 @@ function ClipRow({
             the rest of the chain doesn't need to be redone)
           </label>
           <StartFramePicker clip={clip} characters={characters} onChange={(path) => onUpdate({ start_frame_path: path })} />
-      <ControlVideoField clip={clip} onChange={(path) => onUpdate({ control_video_path: path })} />
+      <ControlVideoField clip={clip} onChange={(path) => onUpdate({ control_video_path: path })} onEnabledChange={(enabled) => onUpdate({ control_video_enabled: enabled })} />
           {characters.length > 1 && (
             <fieldset className="flex flex-col gap-1 text-sm">
               <legend className="opacity-75">

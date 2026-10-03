@@ -278,6 +278,7 @@ class ClipCreate(BaseModel):
     active_character_ids: Optional[list[str]] = None
     start_frame_path: Optional[str] = None  # storyboard first frame (image_start)
     control_video_path: Optional[str] = None  # per-clip depth control video (H3 "DV")
+    control_video_enabled: Optional[bool] = None  # False: keep it attached but generate without it
 
 
 class ClipUpdate(BaseModel):
@@ -290,6 +291,7 @@ class ClipUpdate(BaseModel):
     active_character_ids: Optional[list[str]] = None
     start_frame_path: Optional[str] = None  # "" clears it
     control_video_path: Optional[str] = None  # "" clears it
+    control_video_enabled: Optional[bool] = None
 
 
 class ReorderRequest(BaseModel):
@@ -1283,6 +1285,8 @@ def update_clip(video_id: str, clip_id: str, body: ClipUpdate):
             if body.control_video_path and not Path(body.control_video_path).is_file():
                 raise HTTPException(400, f"control video not found: {body.control_video_path}")
             clip["control_video_path"] = body.control_video_path or None
+        if body.control_video_enabled is not None:
+            clip["control_video_enabled"] = body.control_video_enabled
         if "active_character_ids" in body.model_fields_set:
             clip["active_character_ids"] = body.active_character_ids
         return clip
