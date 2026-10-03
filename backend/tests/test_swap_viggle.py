@@ -150,6 +150,88 @@ def test_a_slowed_down_clip_is_sampled_back_to_the_scenes_real_length():
         assert p["status"] == "done" and scenes.count_frames(p["output_path"]) == 11  # the scene's own 11 frames, not 11 of the 124
 
 
+def test_edit_prompt_for_a_view_from_behind_keeps_the_face_hidden():
+    cast = {"name": "Lafi", "appearance": "a young woman with dark hair", "outfit": "a pink t-shirt"}
+    behind = viggle.edit_prompt("the man in the blue suit", cast, view="behind")
+    assert "from behind" in behind and "do not show their face" in behind.lower() and "a pink t-shirt" in behind and "image 2" in behind.lower()
+    assert viggle.edit_prompt("the man", cast) == viggle.edit_prompt("the man", cast, view="front")
+
+
+def _stills_fixture(d):
+    from backend.tests.test_swap_runner import FakeStore, _make, _project
+
+    src = _make(d / "src.mp4", 96, "white")
+    proj = _project(d, src, frames=48)
+    proj["_dir"] = str(d)
+    proj["source"].update(width=96, height=160)
+    proj["passes"][0]["history"] = []
+    proj["cast"][0]["image_path"] = str(d / "ref.png")
+    cv2.imencode(".png", np.full((40, 30, 3), 90, np.uint8))[1].tofile(str(d / "ref.png"))
+    return proj, FakeStore(proj)
+
+
+class _InlineJobs:
+    def __init__(self):
+        self.runner_calls = 0
+
+    def submit_callable(self, runner_fn, dest, on_done, on_queued=None, on_running=None, on_cancel=None):
+        if on_queued:
+            on_queued("jobS")
+        try:
+            out = runner_fn(dest)
+            on_done(status="done", output_path=str(out), error=None, duration_seconds=1)
+        except Exception as exc:  # noqa: BLE001
+            on_done(status="failed", output_path=None, error=str(exc), duration_seconds=1)
+        return "jobS"
+
+
+def test_make_stills_edits_the_scenes_first_frame_once_per_seed_and_keeps_each_still_on_the_pass():
+    with tempfile.TemporaryDirectory() as t:
+        d = Path(t)
+        proj, fake_store = _stills_fixture(d)
+        proj["passes"][0]["status"] = "done"
+        calls: list[dict] = []
+
+        def factory(params, release):
+            def run(dest):
+                calls.append(params)
+                out = Path(str(dest) + ".png")
+                cv2.imencode(".png", np.full((160, 96, 3), 40 + len(calls), np.uint8))[1].tofile(str(out))
+                return out
+            return run
+
+        viggle.make_stills("p1", "pass0000aaaa", store_mod=fake_store, job_store=_InlineJobs(), release_wangp=lambda: None,
+                           prompt="make it so", count=3, seed=100, comfy_runner_factory=factory)
+        p = proj["passes"][0]
+        assert [c["seed"] for c in calls] == [100, 201, 302] and all(c["prompt"] == "make it so" for c in calls)
+        assert all(len(c["source_paths"]) == 2 and Path(c["source_paths"][0]).exists() for c in calls)  # the scene's frame, then the character photo
+        assert len(p["stills"]) == 3 and all(Path(s["path"]).exists() and s["prompt"] == "make it so" for s in p["stills"])
+        assert p["status"] == "done" and p["job_id"] is None and p.get("activity") is None  # the pass is as it was before
+
+
+def test_a_failing_edit_keeps_the_stills_already_made_and_restores_the_pass():
+    with tempfile.TemporaryDirectory() as t:
+        d = Path(t)
+        proj, fake_store = _stills_fixture(d)
+        proj["passes"][0]["status"] = "draft"
+        n = {"i": 0}
+
+        def factory(params, release):
+            def run(dest):
+                n["i"] += 1
+                if n["i"] == 2:
+                    raise RuntimeError("ComfyUI is not running")
+                out = Path(str(dest) + ".png")
+                cv2.imencode(".png", np.full((160, 96, 3), 60, np.uint8))[1].tofile(str(out))
+                return out
+            return run
+
+        viggle.make_stills("p1", "pass0000aaaa", store_mod=fake_store, job_store=_InlineJobs(), release_wangp=lambda: None,
+                           prompt="x", count=3, seed=1, comfy_runner_factory=factory)
+        p = proj["passes"][0]
+        assert len(p["stills"]) == 1 and p["status"] == "draft" and "ComfyUI is not running" in (p.get("still_error") or "")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     failed = 0

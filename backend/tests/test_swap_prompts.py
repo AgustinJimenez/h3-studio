@@ -135,6 +135,16 @@ def test_clean_look_keeps_ordinary_descriptions_untouched():
     assert prompts.clean_look("") == ""
 
 
+def test_closed_mouths_stay_still_and_closed():
+    t = prompts.build_pass_prompt(P0, CAST, [P0], "")
+    assert "no chewing" in t and "lips together" in t
+
+
+def test_orientation_of_the_person_is_kept():
+    t = prompts.build_pass_prompt(P0, CAST, [P0], "")
+    assert "faces away from the camera" in t and "does not turn around" in t
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     failed = 0

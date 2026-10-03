@@ -222,8 +222,8 @@ function SegmentRow({
         <div className="flex-1">
           <div className="mb-0.5 text-xs font-semibold uppercase opacity-60">Prose</div>
           <textarea
-            rows={2}
-            className="w-full"
+            rows={9}
+            className="w-full resize-y"
             placeholder="Scene description / action / blocking..."
             value={segment.text}
             onChange={(e) => onUpdate({ ...segment, text: e.target.value })}

@@ -39,13 +39,70 @@ def first_frame(clip: str, dest: str) -> None:
     cv2.imencode(".png", frame)[1].tofile(str(dest))
 
 
-def edit_prompt(target: str, cast: dict[str, Any], expression: str = "") -> str:
+def edit_prompt(target: str, cast: dict[str, Any], expression: str = "", view: str = "front") -> str:
     look = (cast.get("appearance") or "").strip().rstrip(".")
     outfit = (cast.get("outfit") or "").strip().rstrip(".")
+    if view == "behind":  # the person faces away: the photo only gives the hair and the clothes, never a face
+        return (f"Image 1 is a frame of a video. Replace {target} in image 1 with the person from image 2"
+                f"{f' ({look})' if look else ''}, still seen from behind: show the back of their hair and head, and the back of the outfit "
+                f"they wear ({outfit}). They face away from the camera exactly like the original person: do not show their face at all. "
+                "Keep image 1's exact pose, head angle, camera framing, background and lighting. Do not change the picture size or crop it.")
     lead = f"{expression.strip()} Keep this expression exactly. " if expression and expression.strip() else ""
     return (f"{lead}Image 1 is a frame of a video. Replace {target} in image 1 with the person shown in image 2"
             f"{f' ({look})' if look else ''}, wearing {outfit}. Keep image 1's exact pose, head angle, expression and gaze direction, "
             "camera framing, background and lighting. Do not change the picture size or crop it. Only change who the person is.")
+
+
+STILLS_MAX = 8
+
+
+def make_stills(project_id: str, pass_id: str, *, store_mod: Any, job_store: Any, release_wangp: Callable[[], None], prompt: str, count: int = 4,
+                seed: int | None = None, comfy_runner_factory: Callable[..., Callable[[Path], Path]] | None = None) -> None:
+    """Queue one job that edits the scene's first frame `count` times (one seed each) into candidate stills for Viggle.
+    Each still is added to the pass as soon as it exists; the pass goes back to the status it had when the job ends."""
+    project = store_mod.find(project_id)
+    pass_ = next(p for p in project["passes"] if p["id"] == pass_id)
+    scene = next(s for s in project["scenes"] if s["index"] == pass_["scene_index"])
+    chunk = next(c for c in scene["chunks"] if c["index"] == pass_["chunk_index"])
+    person = next(x for x in scene["people"] if x["id"] == pass_["person_id"])
+    cast = next(c for c in project["cast"] if c["id"] == person["cast_id"])
+    before = pass_.get("status") or "draft"
+    base = int(seed if seed is not None else (pass_.get("seed") or project["settings"]["seed"]))
+    seeds = [base + i * 101 for i in range(max(1, min(STILLS_MAX, int(count))))]
+    out_dir = Path(store_mod.project_dir(project)) / "passes"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    clip = out_dir / f"{pass_id}_stills_clip.mp4"
+    source = out_dir / f"{pass_id}_still_source.png"
+
+    def prepare(_dest: Path) -> Path:
+        store_mod.update_pass(project_id, pass_id, status="running", still_error=None, activity="stills")
+        scenes.extract_segment(project["source"]["path"], str(clip), scene["start_frame_src"], scene["end_frame_src"],
+                               float(project["source"]["fps"]), chunk["start"], chunk["end"], WINDOW, extend=True)
+        first_frame(str(clip), str(source))
+        make = comfy_runner_factory or _qwen_runner
+        qwen_w, qwen_h = store.size_for_short_side(project["source"]["width"], project["source"]["height"], 768)
+        last = source
+        for s in seeds:
+            still_id = uuid.uuid4().hex[:8]
+            params = {"prompt": prompt, "aspect": "wide", "width": qwen_w, "height": qwen_h, "seed": s,
+                      "output_prefix": f"h3studio/still_{pass_id[:8]}", "source_paths": [str(source), cast["image_path"]]}
+            made = make(params, release_wangp)(out_dir / f"{pass_id}_still_{still_id}_qwen")
+            final = out_dir / f"{pass_id}_still_{still_id}.png"
+            shutil.copyfile(made, final)
+            current = next((p for p in store_mod.find(project_id)["passes"] if p["id"] == pass_id), {})
+            entry = {"id": still_id, "path": str(final), "prompt": prompt, "seed": s, "created_at": time.time()}
+            store_mod.update_pass(project_id, pass_id, stills=list(current.get("stills") or []) + [entry])
+            last = final
+        return last
+
+    def on_done(status: str, output_path: Any = None, error: str | None = None, duration_seconds: float | None = None) -> None:
+        store_mod.update_pass(project_id, pass_id, status=before, job_id=None, activity=None,
+                              still_error=None if status == "done" else (error or "making the stills failed"))
+
+    def queued(job_id: str) -> None:
+        store_mod.update_pass(project_id, pass_id, status="queued", job_id=job_id, still_error=None, activity="stills")
+
+    job_store.submit_callable(prepare, out_dir / "unused.png", on_done, on_queued=queued)
 
 
 def _resize_png(src: str, dest: str, width: int, height: int) -> None:

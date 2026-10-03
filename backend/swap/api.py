@@ -20,6 +20,7 @@ router = APIRouter()
 _job_store: Any = None
 _release_wangp: Callable[[], None] = lambda: None
 _client_factory: Callable[[], Any] = runner.ComfyClient
+_still_runner_factory: Callable[..., Any] | None = None  # tests put a fake image editor here
 ACTIVE = ("queued", "running")
 
 
@@ -148,6 +149,7 @@ def project_view(project: dict[str, Any]) -> dict[str, Any]:
         clip = _scene_clip(project, s)
         s["clip_url"] = media_url(str(clip)) if clip.exists() else None
     for p in v["passes"]:
+        p["stills"] = [{**s, "url": media_url(s.get("path"))} for s in p.get("stills") or []]
         p["output_url"] = media_url(p.get("output_path"))
         p["raw_url"] = media_url(p.get("raw_path"))
         p["params"] = _pass_params(v, p)
@@ -285,8 +287,17 @@ def set_cuts(project_id: str, body: CutsBody):
             sc["people"], sc["background_text"] = old.get("people", []), old.get("background_text", "")
 
     def apply(p: dict[str, Any]) -> None:
+        old_range = {sc["index"]: (sc["start_frame_src"], sc["end_frame_src"]) for sc in p["scenes"]}
+        old_passes = p["passes"]
         store.set_scenes(p, built)
-        store.replan_scenes(p, [sc["index"] for sc in p["scenes"]])  # scenes that kept their people get their passes back
+        # A scene whose frame range did not change keeps its passes, results and edited prompts (its index may shift);
+        # the others are planned afresh when they have people.
+        new_index = {(sc["start_frame_src"], sc["end_frame_src"]): sc["index"] for sc in p["scenes"]}
+        kept = [{**pr, "scene_index": new_index[old_range[pr["scene_index"]]]} for pr in old_passes
+                if old_range.get(pr["scene_index"]) in new_index and p["scenes"][new_index[old_range[pr["scene_index"]]]]["people"]]
+        p["passes"] = kept
+        kept_scenes = {pr["scene_index"] for pr in kept}
+        store.replan_scenes(p, [sc["index"] for sc in p["scenes"] if sc["index"] not in kept_scenes])
 
     updated = _mutate(project_id, apply)
     _write_thumbs(updated)
@@ -710,6 +721,7 @@ def trim_pass(project_id: str, pass_id: str, body: TrimBody):
 class ViggleBody(BaseModel):
     size: int = 640
     seed: int | None = None
+    still_id: str | None = None  # one of the pass's edited stills (see /stills); wins over frame_path
     frame_path: str | None = None  # an edited frame made elsewhere; empty = Qwen edits the scene's first frame
     expression: str = ""  # what the face is doing in that frame (mouth open, gaze), told to the edit first
     clip_path: str | None = None  # a 124-frame control clip made elsewhere (e.g. several scenes joined)
@@ -730,9 +742,72 @@ def viggle_pass(project_id: str, pass_id: str, body: ViggleBody):
         raise HTTPException(409, "this scene has passes queued or running; wait or cancel them first")
     if _job_store is None:
         raise HTTPException(503, "server still starting up")
+    frame_path = body.frame_path
+    if body.still_id:
+        still = next((s for s in target.get("stills") or [] if s["id"] == body.still_id), None)
+        if still is None:
+            raise HTTPException(404, "still not found")
+        frame_path = still["path"]
     store.update(project_id, lambda pr: [store.ensure_history(x) for x in pr["passes"] if x["id"] == pass_id])
     viggle.start(project_id, pass_id, store_mod=store, job_store=_job_store, release_wangp=_release_wangp, size=body.size, seed=body.seed,
-                 frame_path=body.frame_path, expression=body.expression, clip_path=body.clip_path, slice_start=body.slice_start, sample_step=body.sample_step)
+                 frame_path=frame_path, expression=body.expression, clip_path=body.clip_path, slice_start=body.slice_start, sample_step=body.sample_step)
+    return project_view(_get(project_id))
+
+
+def _first_pass(project_id: str, pass_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    project = _get(project_id)
+    target = next((p for p in project["passes"] if p["id"] == pass_id), None)
+    if target is None:
+        raise HTTPException(404, "pass not found")
+    if target["order"] != 0:
+        raise HTTPException(400, "stills are only available for the first pass of a scene")
+    return project, target
+
+
+@router.get("/swaps/{project_id}/passes/{pass_id}/still-prompt")
+def still_prompt(project_id: str, pass_id: str, view: str = "front"):
+    """The default instruction for editing the scene's first frame into the character (view: front or behind)."""
+    project, target = _first_pass(project_id, pass_id)
+    scene = next(s for s in project["scenes"] if s["index"] == target["scene_index"])
+    person = next(x for x in scene["people"] if x["id"] == target["person_id"])
+    cast = next((c for c in project["cast"] if c["id"] == person.get("cast_id")), None)
+    if cast is None:
+        raise HTTPException(400, "choose a character for this person first")
+    return {"prompt": viggle.edit_prompt(person.get("target_description") or "the person", {**cast, "appearance": prompts.clean_look(cast.get("appearance") or "")},
+                                         view="behind" if view == "behind" else "front")}
+
+
+class StillsBody(BaseModel):
+    prompt: str
+    count: int = 4
+    seed: int | None = None
+
+
+@router.post("/swaps/{project_id}/passes/{pass_id}/stills")
+def make_stills(project_id: str, pass_id: str, body: StillsBody):
+    """Queue candidate stills for Viggle: Qwen edits the scene's first frame into the character, once per seed."""
+    project, target = _first_pass(project_id, pass_id)
+    if not body.prompt.strip():
+        raise HTTPException(400, "the instruction is empty")
+    if not 1 <= body.count <= viggle.STILLS_MAX:
+        raise HTTPException(400, f"make between 1 and {viggle.STILLS_MAX} stills")
+    if any(p["status"] in ACTIVE for p in project["passes"] if p["scene_index"] == target["scene_index"]):
+        raise HTTPException(409, "this scene has passes queued or running; wait or cancel them first")
+    if _job_store is None:
+        raise HTTPException(503, "server still starting up")
+    viggle.make_stills(project_id, pass_id, store_mod=store, job_store=_job_store, release_wangp=_release_wangp, prompt=body.prompt.strip(),
+                       count=body.count, seed=body.seed, comfy_runner_factory=_still_runner_factory)
+    return project_view(_get(project_id))
+
+
+@router.delete("/swaps/{project_id}/passes/{pass_id}/stills/{still_id}")
+def delete_still(project_id: str, pass_id: str, still_id: str):
+    _, target = _first_pass(project_id, pass_id)
+    still = next((s for s in target.get("stills") or [] if s["id"] == still_id), None)
+    if still is None:
+        raise HTTPException(404, "still not found")
+    Path(still["path"]).unlink(missing_ok=True)
+    store.update_pass(project_id, pass_id, stills=[s for s in target["stills"] if s["id"] != still_id])
     return project_view(_get(project_id))
 
 

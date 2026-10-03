@@ -136,7 +136,7 @@ def build_plan(project: dict[str, Any]) -> dict[str, Any]:
                     "id": uuid.uuid4().hex, "scene_index": scene["index"], "chunk_index": chunk["index"],
                     "person_id": person["id"], "order": person["order"], "quality": quality, "prompt": "",
                     "status": "draft", "job_id": None, "output_path": None, "raw_path": None, "mean_luma": None,
-                    "error": None, "seconds": None, "width": None, "height": None, "seed": None, "history": [],
+                    "error": None, "seconds": None, "width": None, "height": None, "seed": None, "history": [], "stills": [],
                 }
                 try:
                     entry["prompt"] = prompts.build_pass_prompt(person, cast, people, scene.get("background_text", ""))
@@ -235,6 +235,9 @@ def carry_history(old_passes: list[dict[str, Any]], new_passes: list[dict[str, A
     """A re-plan builds fresh passes; the runs already made for the same (scene, chunk, person order) stay listed."""
     for p in old_passes:
         ensure_history(p)
-    kept = {(p["scene_index"], p["chunk_index"], p["order"]): p.get("history") or [] for p in old_passes}
+    key = lambda p: (p["scene_index"], p["chunk_index"], p["order"])  # noqa: E731
+    kept = {key(p): p.get("history") or [] for p in old_passes}
+    stills = {key(p): p.get("stills") or [] for p in old_passes}  # the edited stills made for Viggle belong to the scene too
     for p in new_passes:
-        p["history"] = list(kept.get((p["scene_index"], p["chunk_index"], p["order"]), []))
+        p["history"] = list(kept.get(key(p), []))
+        p["stills"] = list(stills.get(key(p), []))

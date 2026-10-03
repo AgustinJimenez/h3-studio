@@ -6,10 +6,18 @@ import JobProgress from "./JobProgress";
 import { useActiveJobs } from "../lib/queries";
 import type { SwapPass } from "../schemas";
 
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+function Fact({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-wide text-text-muted">{label}</div>
+      <div className="text-[10px] uppercase tracking-wide text-text-muted">
+        {label}
+      </div>
       <div className="break-words text-xs text-text-h">{children}</div>
     </div>
   );
@@ -59,13 +67,19 @@ export default function SwapPassRow({
   }, [pass.status]);
 
   return (
-    <div id={jobTargetDomId(pass.id)} className="rounded border border-border bg-bg p-2 text-sm">
+    <div
+      id={jobTargetDomId(pass.id)}
+      className="rounded border border-border bg-bg p-2 text-sm"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={pass.status} />
         <span className="font-medium text-text-h">{label}</span>
         <span className="text-xs text-text-muted">
           chunk {pass.chunk_index + 1} · {pass.quality}
-          {pass.status === "running" && elapsed(pass.started_at, now) ? ` · running ${elapsed(pass.started_at, now)}` : ""}
+          {pass.activity === "stills" ? " · making edited stills" : ""}
+          {pass.status === "running" && elapsed(pass.started_at, now)
+            ? ` · running ${elapsed(pass.started_at, now)}`
+            : ""}
           {pass.seconds ? ` · took ${Math.round(pass.seconds / 60)} min` : ""}
           {pass.mean_luma != null ? ` · luma ${pass.mean_luma}` : ""}
         </span>
@@ -74,7 +88,9 @@ export default function SwapPassRow({
             <div className="relative w-36">
               <input
                 className="w-full py-0.5 pr-7 text-xs"
-                placeholder={params?.seed != null ? `Seed (${params.seed})` : "Seed"}
+                placeholder={
+                  params?.seed != null ? `Seed (${params.seed})` : "Seed"
+                }
                 value={seed}
                 onChange={(e) => setSeed(e.target.value.replace(/[^0-9]/g, ""))}
                 title="Seed for this scene's next run; empty = the seed chosen above (or the project seed)"
@@ -84,7 +100,9 @@ export default function SwapPassRow({
                 className="absolute right-1 top-1/2 -translate-y-1/2 border-0 bg-transparent p-0.5 text-text-muted hover:text-text-h"
                 title="Random seed for this scene"
                 aria-label="Random seed for this scene"
-                onClick={() => setSeed(String(Math.floor(Math.random() * 1_000_000)))}
+                onClick={() =>
+                  setSeed(String(Math.floor(Math.random() * 1_000_000)))
+                }
               >
                 <Dices size={14} />
               </button>
@@ -101,11 +119,18 @@ export default function SwapPassRow({
             pass.status !== "blocked" &&
             (pass.status === "draft" && !pass.output_path ? (
               // Not run yet: starts the scene with the quality, size and seed chosen above (the same as "Run all", for this scene).
-              <button className="py-0.5 text-xs" title="Runs this scene with the quality and size chosen above, and this scene's seed if you typed one" onClick={() => onRun(ownSeed)}>
+              <button
+                className="py-0.5 text-xs"
+                title="Runs this scene with the quality and size chosen above, and this scene's seed if you typed one"
+                onClick={() => onRun(ownSeed)}
+              >
                 Run
               </button>
             ) : (
-              <button className="py-0.5 text-xs" onClick={() => onRerun(ownSeed)}>
+              <button
+                className="py-0.5 text-xs"
+                onClick={() => onRerun(ownSeed)}
+              >
                 Re-run
               </button>
             ))
@@ -117,8 +142,16 @@ export default function SwapPassRow({
           <JobProgress progress={job?.progress} />
         </div>
       )}
-      {pass.status === "queued" && job && <div className="mt-1 text-xs text-text-muted">Waiting in the queue · position {job.position}</div>}
-      {pass.error && <div className="mt-1 whitespace-pre-wrap text-xs text-danger">{pass.error}</div>}
+      {pass.status === "queued" && job && (
+        <div className="mt-1 text-xs text-text-muted">
+          Waiting in the queue · position {job.position}
+        </div>
+      )}
+      {pass.error && (
+        <div className="mt-1 whitespace-pre-wrap text-xs text-danger">
+          {pass.error}
+        </div>
+      )}
       {open && (
         <div className="mt-2 space-y-2">
           {params && (
@@ -127,7 +160,8 @@ export default function SwapPassRow({
               <Fact label="With">{params.character || "—"}</Fact>
               <Fact label="Source">{params.source}</Fact>
               <Fact label="Frames">
-                {params.frames_24} real · {params.padded_frames} rendered (24 fps)
+                {params.frames_24} real · {params.padded_frames} rendered (24
+                fps)
               </Fact>
               <Fact label="Sampling">
                 {params.steps} steps · {params.sampler} / {params.scheduler}
@@ -136,17 +170,34 @@ export default function SwapPassRow({
                 {params.width}×{params.height}
               </Fact>
               <Fact label="Seed">{params.seed}</Fact>
-              <Fact label="Model">{params.model.replace(".safetensors", "")}</Fact>
+              <Fact label="Model">
+                {params.model.replace(".safetensors", "")}
+              </Fact>
               <div className="sm:col-span-2 lg:col-span-4">
-                <Fact label="LoRAs">{params.loras.map((l) => l.replace(".safetensors", "")).join(" + ")}</Fact>
+                <Fact label="LoRAs">
+                  {params.loras
+                    .map((l) => l.replace(".safetensors", ""))
+                    .join(" + ")}
+                </Fact>
               </div>
             </div>
           )}
           <div>
-            <div className="text-[10px] uppercase tracking-wide text-text-muted">Prompt{active ? " (locked while queued/running)" : ""}</div>
-            <textarea className="h-40 w-full text-xs" value={prompt} onChange={(e) => setPrompt(e.target.value)} readOnly={active} />
+            <div className="text-[10px] uppercase tracking-wide text-text-muted">
+              Prompt{active ? " (locked while queued/running)" : ""}
+            </div>
+            <textarea
+              className="h-40 w-full text-xs"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              readOnly={active}
+            />
             {!active && (
-              <button className="mt-1 py-0.5 text-xs" disabled={!dirty} onClick={() => onSavePrompt(prompt)}>
+              <button
+                className="mt-1 py-0.5 text-xs"
+                disabled={!dirty}
+                onClick={() => onSavePrompt(prompt)}
+              >
                 Save prompt
               </button>
             )}

@@ -46,6 +46,19 @@ export const useDetectScenes = (id: string) => useSwapMutation<void>(id, () => s
 export const usePatchSwap = (id: string) => useSwapMutation<SwapPatch>(id, (b) => swapApi.patch(id, b));
 export const useSetCuts = (id: string) => useSwapMutation<number[]>(id, (c) => swapApi.setCuts(id, c), "Scenes updated");
 export const useConfirmScenes = (id: string) => useSwapMutation<boolean>(id, (c) => swapApi.confirmScenes(id, c));
+export const useMakeStills = (id: string) =>
+  useSwapMutation<{ passId: string; prompt: string; count: number; seed?: number }>(
+    id,
+    (v) => swapApi.makeStills(id, v.passId, { prompt: v.prompt, count: v.count, seed: v.seed }),
+    "Making stills",
+  );
+export const useDeleteStill = (id: string) => useSwapMutation<{ passId: string; stillId: string }>(id, (v) => swapApi.deleteStill(id, v.passId, v.stillId));
+export const useViggleRun = (id: string) =>
+  useSwapMutation<{ passId: string; stillId: string; size: number; seed?: number }>(
+    id,
+    (v) => swapApi.viggle(id, v.passId, { still_id: v.stillId, size: v.size, seed: v.seed }),
+    "Queued with Viggle",
+  );
 export const useMergeScenes = (id: string) => useSwapMutation<number>(id, (i) => swapApi.merge(id, i));
 export const usePlanSwap = (id: string) => useSwapMutation<void>(id, () => swapApi.plan(id), "Plan built");
 export const usePatchPass = (id: string) =>

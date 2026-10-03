@@ -56,6 +56,13 @@ export const swapApi = {
   patch: (id: string, body: SwapPatch) => call(`/swaps/${id}`, SwapProjectSchema, json("PATCH", body)),
   setCuts: (id: string, cuts: number[]) => call(`/swaps/${id}/cuts`, SwapProjectSchema, json("PUT", { cuts })),
   confirmScenes: (id: string, confirmed: boolean) => call(`/swaps/${id}/scenes/confirm`, SwapProjectSchema, json("POST", { confirmed })),
+  stillPrompt: (id: string, passId: string, view: "front" | "behind") =>
+    call(`/swaps/${id}/passes/${passId}/still-prompt?view=${view}`, z.object({ prompt: z.string() })),
+  makeStills: (id: string, passId: string, body: { prompt: string; count: number; seed?: number }) =>
+    call(`/swaps/${id}/passes/${passId}/stills`, SwapProjectSchema, json("POST", body)),
+  deleteStill: (id: string, passId: string, stillId: string) => call(`/swaps/${id}/passes/${passId}/stills/${stillId}`, SwapProjectSchema, json("DELETE")),
+  viggle: (id: string, passId: string, body: { still_id: string; size: number; seed?: number }) =>
+    call(`/swaps/${id}/passes/${passId}/viggle`, SwapProjectSchema, json("POST", body)),
   merge: (id: string, index: number) => call(`/swaps/${id}/scenes/merge`, SwapProjectSchema, json("POST", { index })),
   plan: (id: string) => call(`/swaps/${id}/plan`, SwapProjectSchema, json("POST")),
   patchPass: (id: string, passId: string, prompt: string) => call(`/swaps/${id}/passes/${passId}`, SwapProjectSchema, json("PATCH", { prompt })),

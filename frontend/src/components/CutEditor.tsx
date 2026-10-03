@@ -189,7 +189,7 @@ export default function CutEditor({
             <button
               disabled={busy || (!dirty && hasScenes)}
               onClick={() => {
-                if (!hasWork || window.confirm("Applying new cuts rebuilds the scenes and discards the planned and rendered passes. Continue?")) onApply(draft);
+                if (!hasWork || window.confirm("Applying new cuts rebuilds the scenes. Scenes whose frames do not change keep their results; the others lose their people and passes. Continue?")) onApply(draft);
               }}
             >
               Apply {draft.length + 1} scenes

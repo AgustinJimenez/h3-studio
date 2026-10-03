@@ -23,6 +23,7 @@ import CutEditor from "../components/CutEditor";
 import ReferenceThumb from "../components/ReferenceThumb";
 import SwapPassRow from "../components/SwapPassRow";
 import SwapSceneCard from "../components/SwapSceneCard";
+import SwapStillsPanel from "../components/SwapStillsPanel";
 import SwapSceneResults from "../components/SwapSceneResults";
 import SwapCompare, { type ResultMeta } from "../components/SwapCompare";
 import SwapPlaylist, { type PlaylistItem } from "../components/SwapPlaylist";
@@ -550,6 +551,15 @@ export default function SwapDetail() {
                           onCancel={() => cancel.mutate(p.id)}
                         />
                       ))}
+                      {passes[0] && passes[0].status !== "blocked" && (
+                        <SwapStillsPanel
+                          swapId={id}
+                          pass={passes.find((p) => p.order === 0) ?? passes[0]}
+                          scene={s}
+                          aspect={aspect}
+                          sceneBusy={passes.some((p) => p.status === "queued" || p.status === "running")}
+                        />
+                      )}
                       {playMode === "individual" && last && (
                         <SwapSceneResults
                           scene={s}

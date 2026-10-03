@@ -24,7 +24,9 @@ KEEP_CLAUSE = (
     "Preserve the source video's camera and framing. Match each person's position, scale, pose and movement "
     "throughout the clip. Copy the exact facial expression, mouth movement and eye direction of the person in "
     "<Video 1> frame by frame: if that person is chewing, looking or has a closed mouth, the new character does not speak. "
-    "Do not show the reference photo or its background."
+    "When the mouth is closed it stays closed with the lips together: no chewing, no jaw or lip movement, no mouthing words. "
+    "Keep the person's orientation: if the person faces away from the camera, the new character also faces away and only the back of the head and hair "
+    "are visible; the new character does not turn around. Do not show the reference photo or its background."
 )
 LIGHT_CLAUSE = (
     "Light the new character exactly like the rest of <Video 1>: the same light direction, colour temperature, softness "

@@ -120,6 +120,8 @@ export const ClipSchema = z.object({
   bridge_to_next: z.boolean().optional().default(false),
   start_frame_path: z.string().nullable().optional(),
   control_video_path: z.string().nullable().optional(),
+  control_video_url: z.string().nullable().optional(),
+  control_video_info: z.object({ frames: z.number(), width: z.number(), height: z.number(), fps: z.number() }).nullable().optional(),
   active_character_ids: z.array(z.string()).nullable().optional(),
   status: StatusSchema.catch("draft"),
   job_id: z.string().nullable().optional(),
@@ -317,8 +319,19 @@ export const SwapRunSchema = z.object({
   source_clip_url: z.string().nullable().optional(),
   extra_loras: z.array(z.tuple([z.string(), z.number()])).catch([]),
   active: z.boolean().catch(false),
+  method: z.string().nullable().optional(), // "viggle", "upscale"; empty for the normal swap
+  edited_frame_url: z.string().nullable().optional(), // the still a Viggle run animated
 });
 export type SwapRun = z.infer<typeof SwapRunSchema>;
+
+export const SwapStillSchema = z.object({
+  id: z.string(),
+  url: z.string().nullable().optional(),
+  prompt: z.string().catch(""),
+  seed: z.number().catch(0),
+  created_at: z.number().nullable().optional(),
+});
+export type SwapStill = z.infer<typeof SwapStillSchema>;
 
 export const SwapPassSchema = z.object({
   id: z.string(),
@@ -339,6 +352,9 @@ export const SwapPassSchema = z.object({
   raw_url: z.string().nullable().optional(),
   started_at: z.number().nullable().optional(),
   history: z.array(SwapRunSchema).catch([]),
+  stills: z.array(SwapStillSchema).catch([]), // candidate edited frames for the Viggle method
+  activity: z.string().nullable().optional(), // "stills" while the candidate stills are being made
+  still_error: z.string().nullable().optional(),
   params: z
     .object({
       character: z.string().catch(""),

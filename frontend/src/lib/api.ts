@@ -76,6 +76,24 @@ export const api = {
   deleteClip: (videoId: string, clipId: string) => request(`/videos/${videoId}/clips/${clipId}`, { method: "DELETE" }),
   reorderClips: (videoId: string, clipIds: string[]) =>
     request(`/videos/${videoId}/clips/reorder`, { method: "PATCH", body: JSON.stringify({ clip_ids: clipIds }) }),
+  uploadControlVideo: async (clipId: string, file: File): Promise<{ path: string }> => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_BASE}/clips/${clipId}/control-video/upload`, { method: "POST", body: form });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const data = await res.json();
+        detail = data.detail ? JSON.stringify(data.detail) : detail;
+      } catch {
+        // keep statusText
+      }
+      throw new Error(`${res.status} ${detail}`);
+    }
+    return res.json();
+  },
+  controlVideoFromSwap: (clipId: string, body: { swap_id: string; first_scene: number; last_scene: number; size: number; frames?: number }): Promise<{ path: string }> =>
+    request(`/clips/${clipId}/control-video/from-swap`, { method: "POST", body: JSON.stringify(body) }),
   generateClip: (clipId: string) => request<{ job_id: string; status: string }>(`/clips/${clipId}/generate`, { method: "POST" }),
   analyzeClip: (clipId: string): Promise<QaReport> => request(`/clips/${clipId}/analyze`, { method: "POST" }),
   unloadModel: () => request<{ ok: boolean }>("/unload-model", { method: "POST" }),

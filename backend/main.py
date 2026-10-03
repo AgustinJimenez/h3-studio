@@ -43,7 +43,7 @@ if str(WANGP_ROOT) not in sys.path:
 STAGING_DIR = Path(__file__).resolve().parent / "outputs"
 STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
-from . import animate, comfy, jobs, lint, options, prompt, qa, store  # noqa: E402
+from . import animate, comfy, control, jobs, lint, options, prompt, qa, store  # noqa: E402
 from .swap import api as swap_api, progress as swap_progress, store as swap_store  # noqa: E402
 
 MEDIA_ROOT = store.VIDEOS_ROOT
@@ -134,6 +134,8 @@ def clip_view(clip: dict[str, Any]) -> dict[str, Any]:
     return {
         **clip,
         "output_url": to_output_url(clip.get("output_path")),
+        "control_video_url": to_output_url(clip.get("control_video_path")),
+        "control_video_info": control.video_info(clip.get("control_video_path")),
         "own_segment_url": own_segment_url,
         "tail_frame_urls": tail_frame_urls,
         "upscale": {**upscale, "output_url": to_output_url(upscale.get("output_path"))} if upscale else upscale,
@@ -1399,6 +1401,62 @@ def generate_clip(clip_id: str):
 
     # Advisory only (never blocks): grid rounding, cut timing, wardrobe drift. See backend/lint.py.
     return {"job_id": job_id, "status": "queued", "lint": lint.lint_clip(video, clip, previous_clip, bridge_end_frame_path)}
+
+
+@app.post("/clips/{clip_id}/control-video/upload")
+async def upload_control_video(clip_id: str, file: UploadFile = File(...)):
+    """Saves a control video picked on the user's machine into this video's own folder and returns its path (the caller then
+    sets it on the clip, like any other edit)."""
+    data = store.load()
+    try:
+        video, clip = store.find_clip_anywhere(data, clip_id)
+    except store.NotFound:
+        raise HTTPException(404, "clip not found")
+    folder = store.video_dir(video["folder"]) / "controls"
+    folder.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", file.filename or "control.mp4")
+    dest = folder / f"{clip_id[:8]}_{store.new_id()[:6]}_{safe_name}"
+    dest.write_bytes(await file.read())
+    if control.video_info(str(dest)) is None:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(400, "that file is not a readable video")
+    return {"path": str(dest).replace("\\", "/"), "info": control.video_info(str(dest))}
+
+
+class ControlFromSwap(BaseModel):
+    swap_id: str
+    first_scene: int  # scene numbers of that swap project, 1-based and inclusive
+    last_scene: int
+    size: int = 320  # shorter side in px; the control video sets the output size
+    frames: int | None = None  # fit the clip to exactly this many frames (the clip's length); empty = keep it, at least 124
+
+
+@app.post("/clips/{clip_id}/control-video/from-swap")
+def control_video_from_swap(clip_id: str, body: ControlFromSwap):
+    """Builds a control video from consecutive scenes of a swap project's source video (24 fps, scaled, slowed to H3's minimum
+    length when shorter) and returns its path."""
+    data = store.load()
+    try:
+        video, clip = store.find_clip_anywhere(data, clip_id)
+    except store.NotFound:
+        raise HTTPException(404, "clip not found")
+    try:
+        project = swap_store.find(body.swap_id)
+    except swap_store.NotFound:
+        raise HTTPException(404, "swap project not found")
+    scn = {s["index"] + 1: s for s in project["scenes"]}
+    if body.first_scene not in scn or body.last_scene not in scn or body.last_scene < body.first_scene:
+        raise HTTPException(400, f"choose scenes between 1 and {len(scn)}, the first not after the last")
+    start, end = scn[body.first_scene]["start_frame_src"], scn[body.last_scene]["end_frame_src"]
+    src = project["source"]
+    width, height = swap_store.size_for_short_side(src["width"], src["height"], body.size)
+    folder = store.video_dir(video["folder"]) / "controls"
+    dest = folder / f"swap_{project['id'][:8]}_s{body.first_scene}-{body.last_scene}_{min(width, height)}p_{store.new_id()[:6]}.mp4"
+    try:
+        info = control.build_control_clip(src["path"], start, end, float(src["fps"]), width, height, str(dest), frames=body.frames)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(500, str(exc))
+    return {"path": str(dest).replace("\\", "/"), "info": {**info, "width": width, "height": height}}
 
 
 @app.get("/clips/{clip_id}/lint")

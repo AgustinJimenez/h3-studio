@@ -481,6 +481,122 @@ def test_saving_a_scene_is_refused_while_its_pass_is_running():
         assert _passes_by_scene(tc.get(f"/swaps/{pid}").json())[0]["status"] == "queued"
 
 
+def test_applying_cuts_keeps_the_results_of_scenes_whose_range_did_not_change():
+    tmp, tc, js, cl, video = _env()
+    with tmp:
+        pid, _ = _setup_project(tc, video)  # scenes (0-23), (24-47), (48-71); people in the first and the last
+        by = _passes_by_scene(tc.get(f"/swaps/{pid}").json())
+        store.update_pass(pid, by[0]["id"], status="done", output_path="a.mp4", seconds=3)
+        store.update_pass(pid, by[2]["id"], status="done", output_path="c.mp4", seconds=4)
+        r = tc.put(f"/swaps/{pid}/cuts", json={"cuts": [12, 24, 48]})  # (0-11) (12-23) (24-47) (48-71): the last range is unchanged, now scene 3
+        assert r.status_code == 200, r.text
+        v = r.json()
+        assert [(s["start_frame_src"], s["end_frame_src"]) for s in v["scenes"]] == [(0, 11), (12, 23), (24, 47), (48, 71)]
+        kept = _passes_by_scene(v)
+        assert list(kept) == [3] and kept[3]["status"] == "done" and kept[3]["output_path"] == "c.mp4"
+        assert kept[3]["person_id"] == v["scenes"][3]["people"][0]["id"]
+
+
+def _png_factory(made: list):
+    import cv2, numpy as np
+
+    def factory(params, release):
+        def run(dest):
+            made.append(params)
+            out = Path(str(dest) + ".png")
+            cv2.imencode(".png", np.full((160, 96, 3), 70 + len(made), np.uint8))[1].tofile(str(out))
+            return out
+        return run
+    return factory
+
+
+class _RunningJobs(FakeJobStore):
+    """Runs a callable job at once, like the real queue would when it is free."""
+
+    def submit_callable(self, runner, dest_path, on_done, on_queued=None, on_running=None, on_cancel=None):
+        job_id = f"job{len(self.submitted)}"
+        self.submitted.append({"job_id": job_id, "runner": runner, "on_done": on_done})
+        if on_queued:
+            on_queued(job_id)
+        try:
+            out = runner(dest_path)
+            on_done(status="done", output_path=str(out), error=None, duration_seconds=1)
+        except Exception as exc:  # noqa: BLE001
+            on_done(status="failed", output_path=None, error=str(exc), duration_seconds=1)
+        return job_id
+
+
+def test_still_prompt_follows_the_view_and_the_cast():
+    tmp, tc, js, cl, video = _env()
+    with tmp:
+        pid, _ = _setup_project(tc, video)
+        p0 = _passes_by_scene(tc.get(f"/swaps/{pid}").json())[0]
+        front = tc.get(f"/swaps/{pid}/passes/{p0['id']}/still-prompt", params={"view": "front"}).json()["prompt"]
+        behind = tc.get(f"/swaps/{pid}/passes/{p0['id']}/still-prompt", params={"view": "behind"}).json()["prompt"]
+        assert "a green dress" in front and "the man" in front and "from behind" not in front
+        assert "from behind" in behind and "a green dress" in behind
+        assert tc.get(f"/swaps/{pid}/passes/nope/still-prompt").status_code == 404
+
+
+def test_making_stills_adds_them_to_the_pass_with_urls_and_they_can_be_deleted():
+    tmp, tc, js, cl, video = _env()
+    with tmp:
+        pid, _ = _setup_project(tc, video)
+        made: list = []
+        api._still_runner_factory = _png_factory(made)
+        api.set_job_store(_RunningJobs(), release_wangp=lambda: None, client_factory=lambda: cl)
+        p0 = _passes_by_scene(tc.get(f"/swaps/{pid}").json())[0]
+        assert tc.post(f"/swaps/{pid}/passes/{p0['id']}/stills", json={"prompt": "  ", "count": 2}).status_code == 400
+        assert tc.post(f"/swaps/{pid}/passes/{p0['id']}/stills", json={"prompt": "x", "count": 0}).status_code == 400
+        r = tc.post(f"/swaps/{pid}/passes/{p0['id']}/stills", json={"prompt": "make her face away", "count": 2, "seed": 50})
+        assert r.status_code == 200, r.text
+        pas = _passes_by_scene(r.json())[0]
+        assert [s["seed"] for s in pas["stills"]] == [50, 151] and all(s["url"] and s["prompt"] == "make her face away" for s in pas["stills"])
+        assert len(made) == 2
+        gone = pas["stills"][0]
+        r = tc.delete(f"/swaps/{pid}/passes/{p0['id']}/stills/{gone['id']}")
+        assert r.status_code == 200 and [s["id"] for s in _passes_by_scene(r.json())[0]["stills"]] == [pas["stills"][1]["id"]]
+        assert tc.delete(f"/swaps/{pid}/passes/{p0['id']}/stills/nope").status_code == 404
+        api._still_runner_factory = None
+
+
+def test_making_stills_is_refused_while_the_scene_is_running():
+    tmp, tc, js, cl, video = _env()
+    with tmp:
+        pid, _ = _setup_project(tc, video)
+        tc.post(f"/swaps/{pid}/run", json={"quality": "preview", "scene_index": 0})
+        p0 = _passes_by_scene(tc.get(f"/swaps/{pid}").json())[0]
+        assert tc.post(f"/swaps/{pid}/passes/{p0['id']}/stills", json={"prompt": "x", "count": 1}).status_code == 409
+
+
+def test_viggle_can_use_a_chosen_still_by_id():
+    tmp, tc, js, cl, video = _env()
+    with tmp:
+        pid, _ = _setup_project(tc, video)
+        p0 = _passes_by_scene(tc.get(f"/swaps/{pid}").json())[0]
+        store.update_pass(pid, p0["id"], stills=[{"id": "abc", "path": "C:/x/still.png", "prompt": "p", "seed": 1, "created_at": 1.0}])
+        seen: list = []
+        real = api.viggle.start
+        api.viggle.start = lambda *a, **kw: seen.append(kw)
+        try:
+            assert tc.post(f"/swaps/{pid}/passes/{p0['id']}/viggle", json={"size": 320, "still_id": "nope"}).status_code == 404
+            r = tc.post(f"/swaps/{pid}/passes/{p0['id']}/viggle", json={"size": 320, "seed": 9, "still_id": "abc"})
+            assert r.status_code == 200, r.text
+            assert seen[0]["frame_path"] == "C:/x/still.png" and seen[0]["size"] == 320 and seen[0]["seed"] == 9
+        finally:
+            api.viggle.start = real
+
+
+def test_a_replan_keeps_the_stills_of_the_scene():
+    tmp, tc, js, cl, video = _env()
+    with tmp:
+        pid, _ = _setup_project(tc, video)
+        p0 = _passes_by_scene(tc.get(f"/swaps/{pid}").json())[0]
+        store.update_pass(pid, p0["id"], stills=[{"id": "abc", "path": "C:/x/still.png", "prompt": "p", "seed": 1, "created_at": 1.0}])
+        r = tc.patch(f"/swaps/{pid}", json={"scenes": [_scene_patch(0, [("p1", "c1", "the man")], "A new wall.")]})
+        assert [s["id"] for s in _passes_by_scene(r.json())[0]["stills"]] == ["abc"]
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     failed = 0
