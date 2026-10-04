@@ -94,6 +94,8 @@ export const api = {
   },
   controlVideoFromSwap: (clipId: string, body: { swap_id: string; first_scene: number; last_scene: number; size: number; frames?: number }): Promise<{ path: string }> =>
     request(`/clips/${clipId}/control-video/from-swap`, { method: "POST", body: JSON.stringify(body) }),
+  useClipTake: (clipId: string, takeId: string) => request<{ ok: boolean }>(`/clips/${clipId}/history/${takeId}/use`, { method: "POST" }),
+  upscaleClip: (clipId: string, scale: number) => request<{ job_id: string; status: string }>(`/clips/${clipId}/upscale`, { method: "POST", body: JSON.stringify({ scale }) }),
   generateClip: (clipId: string) => request<{ job_id: string; status: string }>(`/clips/${clipId}/generate`, { method: "POST" }),
   analyzeClip: (clipId: string): Promise<QaReport> => request(`/clips/${clipId}/analyze`, { method: "POST" }),
   unloadModel: () => request<{ ok: boolean }>("/unload-model", { method: "POST" }),

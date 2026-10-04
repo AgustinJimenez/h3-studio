@@ -15,6 +15,9 @@ import type { Clip, ModelTag, Character } from "../schemas";
 import { jobTargetDomId, useFocusTarget } from "../lib/jobFocus";
 import StartFramePicker from "./StartFramePicker";
 import ControlVideoField from "./ControlVideoField";
+import ClipHistory from "./ClipHistory";
+import ClipUpscale from "./ClipUpscale";
+import ClipQualityField from "./ClipQualityField";
 import { formatFrames } from "../lib/frames";
 
 // Solid fill + white text, same treatment as StatusBadge elsewhere in the
@@ -305,6 +308,7 @@ function ClipSetup({
           characters={characters}
           onChange={(path) => onUpdate(clip.id, { start_frame_path: path })}
         />
+        <ClipQualityField clip={clip} onChange={(b) => onUpdate(clip.id, b)} />
         <ControlVideoField
           clip={clip}
           onChange={(path) => onUpdate(clip.id, { control_video_path: path })}
@@ -585,6 +589,8 @@ export default function ClipCarousel({
             onUpdate={onUpdate}
           />
           <ClipResults clip={clip} />
+          <ClipHistory clip={clip} />
+          <ClipUpscale clip={clip} />
         </div>
       </div>
     </div>

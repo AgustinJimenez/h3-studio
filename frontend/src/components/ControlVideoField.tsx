@@ -6,7 +6,8 @@ import VideoPlayer from "./VideoPlayer";
 import type { Clip } from "../schemas";
 
 // Per-clip depth control video (H3 "Transfer Depth Map From Control Video"): the clip's camera movement and the placement and
-// motion of its people follow this video; the look still comes from the prompt and the references. It sets the output size.
+// motion of its people follow this video; the look still comes from the prompt and the references. It does not set the
+// output size (that is the clip's Size, or the template's).
 // It can be a path, an uploaded file, or consecutive scenes of a swap project's source video.
 export default function ControlVideoField({
   clip,
@@ -56,8 +57,8 @@ export default function ControlVideoField({
         Control video (depth guide)
         <span className="ml-2 text-xs opacity-70">
           Sets this shot's camera movement and where its people are and how they
-          move; the look comes from the prompt and references. It sets the
-          output size.
+          move; the look comes from the prompt and references. The output size
+          is the clip's Size above, not this video's.
         </span>
       </div>
       {clip.control_video_path && onEnabledChange && (
@@ -197,11 +198,12 @@ export default function ControlVideoField({
               <select
                 value={size}
                 onChange={(e) => setSize(e.target.value)}
-                title="Shorter side; the control video sets the output size"
+                title="Shorter side of the control video; match it to the clip's Size"
               >
                 <option value="320">320p (fast test)</option>
                 <option value="480">480p</option>
                 <option value="640">640p</option>
+                <option value="1088">1080p (1088 short side)</option>
               </select>
               <select
                 value={length}

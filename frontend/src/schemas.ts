@@ -122,6 +122,10 @@ export const ClipSchema = z.object({
   control_video_path: z.string().nullable().optional(),
   control_video_url: z.string().nullable().optional(),
   control_video_enabled: z.boolean().nullable().optional(), // false: attached but left out of the generation
+  resolution_override: z.string().nullable().optional(), // this clip only; empty = the template's
+  model_preset: z.string().nullable().optional(), // "pdd8" = fast 8-step model for this clip
+  two_phase: z.boolean().nullable().optional(), // draft at half size, H3 latent upscale, refine
+  upscale: UpscaleSchema.nullable().optional(),
   control_video_info: z.object({ frames: z.number(), width: z.number(), height: z.number(), fps: z.number() }).nullable().optional(),
   active_character_ids: z.array(z.string()).nullable().optional(),
   status: StatusSchema.catch("draft"),
@@ -131,6 +135,22 @@ export const ClipSchema = z.object({
   output_url: z.string().nullable().optional(),
   own_segment_url: z.string().nullable().optional(),
   tail_frame_urls: z.array(z.string()).optional().default([]),
+  history: z
+    .array(
+      z.object({
+        id: z.string(),
+        output_url: z.string().nullable().optional(),
+        finished_at: z.number(),
+        seconds: z.number().nullable().optional(),
+        seed: z.number().nullable().optional(),
+        resolution: z.string().nullable().optional(),
+        steps: z.number().nullable().optional(),
+        label: z.string().optional().default(""),
+        current: z.boolean().optional().default(false),
+      }),
+    )
+    .optional()
+    .default([]),
   last_generation_settings: z.record(z.string(), z.unknown()).nullable().optional(),
   generation_duration_seconds: z.number().nullable().optional(),
   qa_report: QaReportSchema.nullable().optional(),

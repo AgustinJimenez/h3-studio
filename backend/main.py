@@ -19,6 +19,7 @@ import random
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -43,7 +44,7 @@ if str(WANGP_ROOT) not in sys.path:
 STAGING_DIR = Path(__file__).resolve().parent / "outputs"
 STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
-from . import animate, comfy, control, jobs, lint, options, prompt, qa, store  # noqa: E402
+from . import animate, clip_history, comfy, control, jobs, lint, options, prompt, qa, store  # noqa: E402
 from .swap import api as swap_api, progress as swap_progress, store as swap_store  # noqa: E402
 
 MEDIA_ROOT = store.VIDEOS_ROOT
@@ -138,6 +139,11 @@ def clip_view(clip: dict[str, Any]) -> dict[str, Any]:
         "control_video_info": control.video_info(clip.get("control_video_path")),
         "own_segment_url": own_segment_url,
         "tail_frame_urls": tail_frame_urls,
+        "history": [
+            {**{k: v for k, v in e.items() if k != "settings"}, "output_url": to_output_url(e["output_path"]), "current": e["output_path"] == clip.get("output_path")}
+            for e in clip.get("history") or []
+            if Path(e["output_path"]).exists()
+        ],
         "upscale": {**upscale, "output_url": to_output_url(upscale.get("output_path"))} if upscale else upscale,
     }
 
@@ -292,6 +298,9 @@ class ClipUpdate(BaseModel):
     start_frame_path: Optional[str] = None  # "" clears it
     control_video_path: Optional[str] = None  # "" clears it
     control_video_enabled: Optional[bool] = None
+    resolution_override: Optional[str] = None  # "" = the video template's resolution
+    model_preset: Optional[str] = None  # "" = the video template's model; "pdd8" = fast 8-step
+    two_phase: Optional[bool] = None  # draft at half size + H3 latent upscale + refine
 
 
 class ReorderRequest(BaseModel):
@@ -1287,6 +1296,16 @@ def update_clip(video_id: str, clip_id: str, body: ClipUpdate):
             clip["control_video_path"] = body.control_video_path or None
         if body.control_video_enabled is not None:
             clip["control_video_enabled"] = body.control_video_enabled
+        if body.resolution_override is not None:
+            if body.resolution_override and not re.fullmatch(r"\d{3,4}x\d{3,4}", body.resolution_override):
+                raise HTTPException(400, "resolution must look like 576x1024")
+            clip["resolution_override"] = body.resolution_override or None
+        if body.model_preset is not None:
+            if body.model_preset and body.model_preset not in prompt.MODEL_PRESETS:
+                raise HTTPException(400, f"unknown model preset: {body.model_preset}")
+            clip["model_preset"] = body.model_preset or None
+        if body.two_phase is not None:
+            clip["two_phase"] = body.two_phase
         if "active_character_ids" in body.model_fields_set:
             clip["active_character_ids"] = body.active_character_ids
         return clip
@@ -1385,7 +1404,8 @@ def generate_clip(clip_id: str):
         raise HTTPException(400, str(exc))
     except prompt.UnknownPromptTags as exc:
         raise HTTPException(400, str(exc))
-    dest_path = store.clips_dir(video["folder"]) / f"{clip_id}.mp4"
+    # One file per run, so an earlier take is never overwritten by the next one (see clip_history).
+    dest_path = store.clips_dir(video["folder"]) / f"{clip_id}_{store.new_id()[:8]}.mp4"
 
     def mark_queued(job_id: str) -> None:
         store.update_clip(video["id"], clip_id, status="queued", job_id=job_id, error=None, last_generation_settings=settings)
@@ -1396,6 +1416,10 @@ def generate_clip(clip_id: str):
     def on_done(status: str, output_path: str | None, error: str | None, duration_seconds: float | None = None) -> None:
         fields: dict[str, Any] = dict(status=status, output_path=output_path, error=error, generation_duration_seconds=duration_seconds)
         if status == "done" and output_path:
+            fields["history"] = clip_history.add(
+                store.find_clip_anywhere(store.load(), clip_id)[1].get("history"),
+                clip_history.make_entry(output_path, settings, duration_seconds, time.time()),
+            )
             fields["own_segment_path"] = _compute_own_segment_path(video, clip, output_path)
             fields["tail_frame_paths"] = _extract_tail_frames(video, clip, output_path)
         else:
@@ -1412,6 +1436,30 @@ def generate_clip(clip_id: str):
 
     # Advisory only (never blocks): grid rounding, cut timing, wardrobe drift. See backend/lint.py.
     return {"job_id": job_id, "status": "queued", "lint": lint.lint_clip(video, clip, previous_clip, bridge_end_frame_path)}
+
+
+@app.post("/clips/{clip_id}/history/{entry_id}/use")
+def use_history_entry(clip_id: str, entry_id: str):
+    """Makes an earlier take the clip's current output again (with the settings that made it) and re-joins the video."""
+    data = store.load()
+    try:
+        video, clip = store.find_clip_anywhere(data, clip_id)
+    except store.NotFound:
+        raise HTTPException(404, "clip not found")
+    entry = clip_history.find(clip.get("history"), entry_id)
+    if entry is None or not Path(entry["output_path"]).exists():
+        raise HTTPException(404, "that take is not available any more")
+    out = entry["output_path"]
+    store.update_clip(
+        video["id"], clip_id, status="done", error=None, output_path=out, last_generation_settings=entry.get("settings"),
+        generation_duration_seconds=entry.get("seconds"), own_segment_path=_compute_own_segment_path(video, clip, out),
+        tail_frame_paths=_extract_tail_frames(video, clip, out),
+    )
+    try:
+        _run_concat(video["id"])
+    except Exception:
+        pass
+    return {"ok": True}
 
 
 @app.post("/clips/{clip_id}/control-video/upload")
@@ -1485,8 +1533,12 @@ def lint_clip_endpoint(clip_id: str):
     return lint.lint_clip(video, clip, previous_clip)
 
 
+class ClipUpscaleBody(BaseModel):
+    scale: float = 1.5  # FlashVSR factor
+
+
 @app.post("/clips/{clip_id}/upscale")
-def upscale_clip(clip_id: str):
+def upscale_clip(clip_id: str, body: ClipUpscaleBody | None = None):
     """FlashVSR-upscales one finished story clip in place-ish (never
     overwrites the raw output; a sibling `upscale: {status, output_path,
     ...}` sub-dict is attached, same pattern as reference-video/reference
@@ -1508,7 +1560,7 @@ def upscale_clip(clip_id: str):
         raise HTTPException(400, "clip has no completed output to upscale")
 
     output_filename = f"{video['id']}_clip_{clip_id}_upscaled"
-    settings = prompt.build_upscale_settings(src_path, output_filename, scale=1.5)
+    settings = prompt.build_upscale_settings(src_path, output_filename, scale=(body.scale if body else 1.5))
     dest_path = store.clips_dir(video["folder"]) / f"{clip_id}_upscaled.mp4"
 
     def mark_queued(job_id: str) -> None:

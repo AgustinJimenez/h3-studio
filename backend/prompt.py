@@ -526,6 +526,14 @@ def _finalize_settings(
     return settings
 
 
+H3_PHASE_2_NOISE_LEVEL_START = 0.9035  # models/minimax_h3/constants.py's default for the second phase
+
+# Per-clip model choice, applied over the video's template (the fast 8-step checkpoint for quick tests of one clip).
+MODEL_PRESETS = {
+    "pdd8": {k: DEFAULT_TEMPLATE_SETTINGS[k] for k in ("model_type", "model_filename", "num_inference_steps", "guidance_phases")},
+}
+
+
 def build_generation_settings(
     video: dict[str, Any],
     clip: dict[str, Any],
@@ -553,6 +561,13 @@ def build_generation_settings(
     clip's opening frame — instead of the next clip becoming a stale,
     visually-discontinuous dead end that also needs regenerating."""
     template = {**DEFAULT_TEMPLATE_SETTINGS, **(video.get("template_settings") or {})}
+    template.update(MODEL_PRESETS.get(clip.get("model_preset") or "", {}))
+    if clip.get("resolution_override"):
+        template["resolution"] = clip["resolution_override"]
+    if clip.get("two_phase") and not clip.get("model_preset"):
+        # H3's latent upscaler: a draft at half the size, its latent upscaled 2x, then refined at the full size
+        # (the PDD checkpoint locks guidance_phases to 1, so the preset wins).
+        template.update({"guidance_phases": 2, "switch_threshold": H3_PHASE_2_NOISE_LEVEL_START})
     characters = active_characters_for_clip(video, clip)
     # Storyboard first frame (image_start / "S"): the clip opens exactly on
     # this image -- a Qwen still made as an edit of the set image, so every

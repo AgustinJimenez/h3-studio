@@ -7,7 +7,7 @@ const ACTIVE_STATUSES = new Set(["queued", "running"]);
 
 function videoHasActiveWork(video: { clips: Clip[]; characters: Character[] } | undefined): boolean {
   if (!video) return false;
-  if (video.clips.some((c) => ACTIVE_STATUSES.has(c.status))) return true;
+  if (video.clips.some((c) => ACTIVE_STATUSES.has(c.status) || ACTIVE_STATUSES.has(c.upscale?.status ?? "none"))) return true;
   for (const character of video.characters) {
     if (character.reference_videos.some((rv) => ACTIVE_STATUSES.has(rv.status) || ACTIVE_STATUSES.has(rv.upscale?.status ?? "none"))) return true;
     if (character.references.some((r) => ACTIVE_STATUSES.has(r.upscale?.status ?? "none"))) return true;
