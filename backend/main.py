@@ -111,6 +111,18 @@ def to_output_url(path_str: str | None) -> str | None:
     return f"/media/{rel.as_posix()}"
 
 
+def versioned_output_url(path_str: str | None) -> str | None:
+    """Like to_output_url, for files that are rewritten under the same name (own segment, tail frames, upscale): the file's
+    modification time is added so a browser never shows a cached older version."""
+    url = to_output_url(path_str)
+    if not url:
+        return None
+    try:
+        return f"{url}?v={Path(path_str).stat().st_mtime_ns}"
+    except OSError:
+        return url
+
+
 def animate_output_url(path_str: str | None) -> str | None:
     if not path_str:
         return None
@@ -129,8 +141,8 @@ def clip_view(clip: dict[str, Any]) -> dict[str, Any]:
     # own_segment_url: this clip's own new portion only (trimmed of the
     # inherited lead-in from continuation mode), for review — falls back to
     # the full output when there's nothing to trim (not a continuation clip).
-    own_segment_url = to_output_url(clip.get("own_segment_path")) or to_output_url(clip.get("output_path"))
-    tail_frame_urls = [url for p in (clip.get("tail_frame_paths") or []) if (url := to_output_url(p))]
+    own_segment_url = versioned_output_url(clip.get("own_segment_path")) or to_output_url(clip.get("output_path"))
+    tail_frame_urls = [url for p in (clip.get("tail_frame_paths") or []) if (url := versioned_output_url(p))]
     upscale = clip.get("upscale") or {}
     return {
         **clip,
@@ -144,7 +156,7 @@ def clip_view(clip: dict[str, Any]) -> dict[str, Any]:
             for e in clip.get("history") or []
             if Path(e["output_path"]).exists()
         ],
-        "upscale": {**upscale, "output_url": to_output_url(upscale.get("output_path"))} if upscale else upscale,
+        "upscale": {**upscale, "output_url": versioned_output_url(upscale.get("output_path"))} if upscale else upscale,
     }
 
 
@@ -299,8 +311,10 @@ class ClipUpdate(BaseModel):
     control_video_path: Optional[str] = None  # "" clears it
     control_video_enabled: Optional[bool] = None
     resolution_override: Optional[str] = None  # "" = the video template's resolution
+    trim_start_frames: Optional[int] = None  # frames cut off the start of this clip's output when the video is joined
     model_preset: Optional[str] = None  # "" = the video template's model; "pdd8" = fast 8-step
     two_phase: Optional[bool] = None  # draft at half size + H3 latent upscale + refine
+    video_references_enabled: Optional[bool] = None  # False: this clip leaves out the characters' video references
 
 
 class ReorderRequest(BaseModel):
@@ -1306,6 +1320,12 @@ def update_clip(video_id: str, clip_id: str, body: ClipUpdate):
             clip["model_preset"] = body.model_preset or None
         if body.two_phase is not None:
             clip["two_phase"] = body.two_phase
+        if body.video_references_enabled is not None:
+            clip["video_references_enabled"] = body.video_references_enabled
+        if body.trim_start_frames is not None:
+            if body.trim_start_frames < 0:
+                raise HTTPException(400, "trim_start_frames cannot be negative")
+            clip["trim_start_frames"] = body.trim_start_frames or None
         if "active_character_ids" in body.model_fields_set:
             clip["active_character_ids"] = body.active_character_ids
         return clip
@@ -1314,6 +1334,15 @@ def update_clip(video_id: str, clip_id: str, body: ClipUpdate):
         clip = store.mutate(apply)
     except store.NotFound:
         raise HTTPException(404, "video or clip not found")
+    if body.trim_start_frames is not None and clip.get("status") == "done" and clip.get("output_path") and Path(clip["output_path"]).exists():
+        # A finished clip: its trimmed preview and the joined video follow the new trim right away.
+        video = store.find_video(store.load(), video_id)
+        store.update_clip(video_id, clip_id, own_segment_path=_compute_own_segment_path(video, clip, clip["output_path"]))
+        try:
+            _run_concat(video_id)
+        except Exception:
+            pass
+        clip = store.find_clip(store.find_video(store.load(), video_id), clip_id)
     return clip_view(clip)
 
 
@@ -1749,17 +1778,20 @@ def _extract_tail_frames(video: dict[str, Any], clip: dict[str, Any], output_pat
 def _compute_own_segment_path(video: dict[str, Any], clip: dict[str, Any], output_path: str) -> str | None:
     """A continuation clip's own file spans its whole chain so far (e.g.
     clip 2 continuing clip 1 = 0-30s, not just its own new 15-30s). For review
-    purposes this trims off the inherited lead-in, producing a clean slice."""
-    if not clip.get("continue_from_previous"):
-        return None
-    previous_clip = next((c for c in video.get("clips") or [] if c["order"] == clip["order"] - 1), None)
-    if not previous_clip or not previous_clip.get("output_path"):
-        return None
-    previous_seconds = _get_video_duration_seconds(previous_clip["output_path"])
-    if previous_seconds <= 0:
-        return None
+    purposes this trims off the inherited lead-in, producing a clean slice. Frames the user trimmed off the start
+    (`trim_start_frames`) are dropped too, for any clip."""
+    previous_seconds = 0.0
+    if clip.get("continue_from_previous"):
+        previous_clip = next((c for c in video.get("clips") or [] if c["order"] == clip["order"] - 1), None)
+        if not previous_clip or not previous_clip.get("output_path"):
+            return None
+        previous_seconds = _get_video_duration_seconds(previous_clip["output_path"])
+        if previous_seconds <= 0:
+            return None
     # With context frames the output holds only those (not the whole previous clip) before the new part.
-    start = control.lead_in_seconds(clip.get("continuation_keep_frames"), previous_seconds)
+    start = control.start_offset_seconds(clip, previous_seconds)
+    if start <= 0:
+        return None
     dest = store.clips_dir(video["folder"]) / f"{clip['id']}_own_segment.mp4"
     return str(dest) if control.own_segment(str(output_path), str(dest), start) else None
 

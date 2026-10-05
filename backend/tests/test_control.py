@@ -130,6 +130,30 @@ def test_clips_that_are_not_done_are_left_out():
     assert paths == ["clip0.mp4", "clip2.mp4"]
 
 
+def test_a_trimmed_clip_starts_later_by_the_trimmed_frames_on_top_of_any_lead_in():
+    assert control.start_offset_seconds({}, 5.0) == 0
+    assert control.start_offset_seconds({"trim_start_frames": 28}, 5.0) == 28 / 24
+    assert control.start_offset_seconds({"continue_from_previous": True, "continuation_keep_frames": 5, "trim_start_frames": 28}, 5.0) == 33 / 24
+    assert control.start_offset_seconds({"continue_from_previous": True, "trim_start_frames": 12}, 5.0) == 5.0 + 12 / 24
+
+
+def test_a_trimmed_clip_joins_by_its_own_segment_even_without_continuation():
+    clips = [_clip(0), _clip(1, trim_start_frames=28, own_segment_path="own1.mp4")]
+    paths, mixed = control.segments_to_join(clips)
+    assert paths == ["clip0.mp4", "own1.mp4"] and mixed is True
+
+
+def test_a_whole_continuation_that_is_trimmed_keeps_the_clip_before_it():
+    clips = [_clip(0), _clip(1, continue_from_previous=True, trim_start_frames=10, own_segment_path="own1.mp4")]
+    paths, mixed = control.segments_to_join(clips)
+    assert paths == ["clip0.mp4", "own1.mp4"] and mixed is True
+
+
+def test_a_clip_with_no_trim_ignores_a_stale_own_segment():
+    paths, mixed = control.segments_to_join([_clip(0), _clip(1, own_segment_path="old_own1.mp4")])
+    assert paths == ["clip0.mp4", "clip1.mp4"] and mixed is False
+
+
 def test_video_info_of_a_missing_file_is_none():
     assert control.video_info("nope.mp4") is None
 

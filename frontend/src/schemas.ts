@@ -125,6 +125,8 @@ export const ClipSchema = z.object({
   resolution_override: z.string().nullable().optional(), // this clip only; empty = the template's
   model_preset: z.string().nullable().optional(), // "pdd8" = fast 8-step model for this clip
   two_phase: z.boolean().nullable().optional(), // draft at half size, H3 latent upscale, refine
+  video_references_enabled: z.boolean().nullable().optional(), // false: this clip leaves out the characters' video references
+  trim_start_frames: z.number().nullable().optional(), // frames cut off the start of this clip when the video is joined
   upscale: UpscaleSchema.nullable().optional(),
   control_video_info: z.object({ frames: z.number(), width: z.number(), height: z.number(), fps: z.number() }).nullable().optional(),
   active_character_ids: z.array(z.string()).nullable().optional(),

@@ -5,6 +5,12 @@ import { api, mediaUrl } from "../lib/api";
 import VideoPlayer from "./VideoPlayer";
 import type { Clip } from "../schemas";
 
+// Each take is shown in its own shape (from its render size), so a portrait take is not letterboxed in a 16:9 box.
+function ratioOf(resolution?: string | null): number {
+  const m = /^(\d+)x(\d+)$/.exec(resolution ?? "");
+  return m ? Number(m[1]) / Number(m[2]) : 16 / 9;
+}
+
 // Every finished generation of the clip, newest first, so an earlier take can be watched and brought back.
 export default function ClipHistory({ clip }: { clip: Clip }) {
   const qc = useQueryClient();
@@ -33,12 +39,13 @@ export default function ClipHistory({ clip }: { clip: Clip }) {
           {takes.length} take{takes.length === 1 ? "" : "s"}
         </span>
       </summary>
-      <div className="flex flex-wrap gap-3 border-t border-border p-3">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4 border-t border-border p-3">
         {takes.map((t, i) => (
-          <div key={t.id} className="flex w-44 flex-col gap-1 text-xs">
+          <div key={t.id} className="flex flex-col gap-1 text-sm">
             <VideoPlayer
               src={mediaUrl(t.output_url) ?? ""}
               className="w-full rounded border border-border"
+              style={{ aspectRatio: ratioOf(t.resolution), width: "100%" }}
               loop
               muted
             />

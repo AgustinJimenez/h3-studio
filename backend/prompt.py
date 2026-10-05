@@ -219,6 +219,11 @@ def effective_references(character: dict[str, Any]) -> list[dict[str, Any]]:
     return character.get("references") or []
 
 
+def without_video_references(character: dict[str, Any]) -> dict[str, Any]:
+    """The character as one clip may see it when that clip leaves the video references out: its pictures and audio stay."""
+    return {**character, "references": [r for r in character.get("references") or [] if r.get("type") != "video"], "active_reference_video_id": None}
+
+
 def compose_references(characters: list[dict[str, Any]]) -> dict[str, Any]:
     """Flatten every character's references into the WanGP settings fields,
     numbering <Picture N>/<Video N>/<Audio N> within each type as we go (the
@@ -569,6 +574,8 @@ def build_generation_settings(
         # (the PDD checkpoint locks guidance_phases to 1, so the preset wins).
         template.update({"guidance_phases": 2, "switch_threshold": H3_PHASE_2_NOISE_LEVEL_START})
     characters = active_characters_for_clip(video, clip)
+    if clip.get("video_references_enabled") is False:
+        characters = [without_video_references(c) for c in characters]
     # Storyboard first frame (image_start / "S"): the clip opens exactly on
     # this image -- a Qwen still made as an edit of the set image, so every
     # cut starts in the same room. WanGP orders anchors start, then end.

@@ -63,6 +63,13 @@ def lead_in_seconds(keep_frames: int | None, previous_seconds: float, fps: int =
     return keep_frames / fps if keep_frames else previous_seconds
 
 
+def start_offset_seconds(clip: dict[str, Any], previous_seconds: float, fps: int = FPS) -> float:
+    """Where the part of a clip's file that belongs to the video starts: after what it inherited from the previous clip (when it
+    continues one) and after the opening frames the user trimmed off (`trim_start_frames`)."""
+    inherited = lead_in_seconds(clip.get("continuation_keep_frames"), previous_seconds, fps) if clip.get("continue_from_previous") else 0.0
+    return inherited + int(clip.get("trim_start_frames") or 0) / fps
+
+
 def own_segment(src: str, dest: str, start_seconds: float) -> bool:
     """Writes the part of `src` after the first `start_seconds` (re-encoded, so the cut is frame accurate)."""
     r = subprocess.run([scenes.ffmpeg_exe(), "-v", "error", "-y", "-ss", f"{start_seconds:.4f}", "-i", str(src), "-c:v", "libx264", "-crf", "14",
@@ -80,9 +87,10 @@ def segments_to_join(clips: list[dict[str, Any]]) -> tuple[list[str], bool]:
     for order in sorted(done):
         clip = done[order]
         nxt = done.get(order + 1)
-        if nxt and nxt.get("continue_from_previous") and not nxt.get("continuation_keep_frames"):
+        if nxt and nxt.get("continue_from_previous") and not nxt.get("continuation_keep_frames") and not nxt.get("trim_start_frames"):
             continue
-        if clip.get("continue_from_previous") and clip.get("continuation_keep_frames") and clip.get("own_segment_path"):
+        trimmed = bool(clip.get("trim_start_frames"))
+        if (trimmed or (clip.get("continue_from_previous") and clip.get("continuation_keep_frames"))) and clip.get("own_segment_path"):
             paths.append(clip["own_segment_path"])
             mixed = True
         else:

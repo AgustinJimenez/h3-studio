@@ -45,6 +45,25 @@ def test_two_phase_off_keeps_a_single_phase():
     assert s["guidance_phases"] == 1 and "switch_threshold" not in s
 
 
+def _video_with_a_video_reference() -> dict:
+    v = _video()
+    v["characters"] = [{"id": "m1", "name": "Markos", "kind": "person", "identity_description": "a man", "wardrobe_notes": "",
+                        "references": [{"id": "r1", "type": "image", "path": "m.png", "note": "photo"},
+                                       {"id": "r2", "type": "video", "path": "dance.mp4", "note": "dance movement"}]}]
+    return v
+
+
+def test_video_references_are_used_by_default():
+    s = prompt.build_generation_settings(_video_with_a_video_reference(), _clip())
+    assert s["video_guide"] == "dance.mp4" and "V-" in s["video_prompt_type"] and "<Video 1>" in s["prompt"]
+
+
+def test_a_clip_can_leave_out_the_video_references_and_keeps_the_pictures():
+    s = prompt.build_generation_settings(_video_with_a_video_reference(), _clip(video_references_enabled=False))
+    assert not s.get("video_guide") and "V-" not in s["video_prompt_type"] and "<Video 1>" not in s["prompt"]
+    assert s["image_refs"] == ["m.png"] and "<Picture 1>" in s["prompt"]
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     failed = 0
